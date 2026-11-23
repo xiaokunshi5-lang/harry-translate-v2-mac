@@ -9,10 +9,29 @@ HARRY Translate V2 Mac 是面向 Apple Silicon Mac 的本地实时同传桌面�
 优先架构，核心工程行为可以在没有云端密钥的情况下通过 Mock 和本地测试
 验证。
 
+## 下载正式版
+
+- [GitHub Release](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-mac-ready)
+- [arm64 DMG 直接下载](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-mac-ready/HARRY.Translate_0.2.0_aarch64.dmg)
+- 文件大小：`22,208,525` 字节
+- SHA-256：
+  `eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd`
+
+下载后可在终端校验：
+
+```bash
+shasum -a 256 \
+  "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+```
+
+该构建是 ad-hoc 签名，未经过 Apple notarization。首次打开若被 Gatekeeper
+拦截，可在 Finder 中按住 Control 点击应用并选择“打开”，或按系统提示进入
+“系统设置 > 隐私与安全性”选择“仍要打开”。不要关闭全局 Gatekeeper。
+
 ## 当前状态
 
 - 源码、锁文件、构建脚本、测试和本地部署文档均已纳入仓库。
-- 正式版标签为 `v2.0-mac-ready`，本地出厂产物为 arm64 `.dmg`。
+- 正式版标签为 `v2.0-mac-ready`，GitHub Release 提供 arm64 `.dmg`。
 - 字幕浮窗可在 QuickTime、Safari 视频、Keynote、PowerPoint 等 macOS
   原生全屏 Space 上显示。
 - 总结功能默认关闭；总结窗口是可关闭的普通 Tauri 窗口，不承诺显示在

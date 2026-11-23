@@ -2,8 +2,8 @@
 
 > **目标平台**：Apple Silicon macOS 13+
 > **架构边界**：单窗口、单主会话、单活跃上游 Qwen WebSocket
-> **终审基线**：`checkpoint-r16-ok` / `7583c4d`
-> **正式发布标签**：`v2.0-mac-ready` / `4cd5529`
+> **私人终审基线**：`checkpoint-r16-ok` / `7583c4d`
+> **公开发布标签**：`v2.0-mac-ready` / `7d3df1b`
 > **自动验证日期**：2026-11-24
 > **状态**：正式源码已完成本地自动门禁、公开仓库独立历史整理和私人备份
 
@@ -23,7 +23,7 @@
 - Qwen 3.8 单路会话、无顶层 `turn_detection`、`<400>` 极简降级和
   `1007/429` 退避。
 - 静默纠错、默认关闭总结、动态字幕分区滚动和有界清洗器状态。
-- arm64 `.dmg` 本地构建、Sidecar 生命周期检查和公开依赖锁文件。
+- arm64 `.dmg` GitHub Release 资产、Sidecar 生命周期检查和公开依赖锁文件。
 
 R17 不新增用户业务功能。它完成终审压测、看门狗门禁、开源合规、文档闭环
 和发布证据整理。
@@ -35,8 +35,10 @@ R17 不新增用户业务功能。它完成终审压测、看门狗门禁、开�
 | R16 收口标签 | `checkpoint-r16-ok` |
 | R16 收口提交 | `7583c4d0aa6385a87079c047bc6db9466f1bd7bb` |
 | R16 历史 L1 | `pre-feature-p6-20261123` / `4b60435` |
-| 正式发布标签 | `v2.0-mac-ready` |
-| 正式源码提交 | `4cd5529d112ec14ece1c040ff77ce0711f9e8af4` |
+| 私人 R17 源码提交 | `4cd5529d112ec14ece1c040ff77ce0711f9e8af4` |
+| 私人备份发布提交 | `6a0657b` |
+| 公开发布标签 | `v2.0-mac-ready` |
+| 公开标签提交 | `7d3df1b47cf7e8b2df3369c5b7acc90e52e22554` |
 | R17 可信基线性能 | `0.000701 ms` |
 | Python 环境 | `.venv-v2` |
 | Node 版本文件 | `frontend/.nvmrc` |
@@ -44,7 +46,9 @@ R17 不新增用户业务功能。它完成终审压测、看门狗门禁、开�
 | 发布构建 | `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/` |
 
 `checkpoint-r16-ok` 的标签说明明确保留 MD/SRT/JSON 用户侧下载/打开待开放
-边界。R17 不把该能力计入已交付。
+边界。R17 不把该能力计入已交付。历史轮次标签只存在于私人开发仓库；
+公开仓库以独立干净历史发布 `v2.0-mac-ready`，不能按公开仓库解析
+`checkpoint-r16-ok`。
 
 ## 3. R17 压测结果
 
@@ -193,25 +197,31 @@ gating 或广播热路径。门禁仍使用原 `3%` 阈值，没有设置
 
 ## 8. 发布产物
 
-```text
-src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/HARRY Translate_0.2.0_aarch64.dmg
-```
+- Release 页面：
+  `https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-mac-ready`
+- DMG 资产：
+  `HARRY.Translate_0.2.0_aarch64.dmg`
+- 文件大小：`22,208,525` 字节
+- SHA-256：
+  `eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd`
 
-文件大小约 `21 MB`，SHA-256：
+DMG 是 GitHub Release 资产，不进入源码 Git 历史。状态为非草稿、非预发布，
+下载资产由 GitHub Release 独立管理。
 
-```text
-eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
-```
-
-该目录是本地构建产物，不提交 Git。发布使用前应重新运行 R17 压测、
+Release 同时提供 `.sha256` sidecar。发布使用前仍应重新运行 R17 压测、
 看门狗、前端/Rust 构建和 Sidecar 生命周期检查。
 
 ## 9. 回滚
 
+公开仓库：
+
 ```bash
-./scripts/rollback.sh checkpoint-r16-ok --dry-run
-./scripts/rollback.sh checkpoint-r16-ok
+./scripts/rollback.sh v2.0-mac-ready --dry-run
+./scripts/rollback.sh v2.0-mac-ready
 ```
+
+`checkpoint-r16-ok` 等开发轮次标签只在私人仓库中保留。不要把私人仓库的
+历史标签写成公开仓库可直接执行的命令，也不要为了补齐公开文档移动旧标签。
 
 真实回滚会先创建 `rescue/head_*` 和必要的 `rescue/wip_*` 分支，并保护
 `.env*`、`.venv*`、`.agents/`、本地配置、词库、导出、日志和归档。

@@ -5,7 +5,45 @@
 
 ## 1. 获取正式版
 
-公开正式版：
+普通用户优先下载 GitHub Release 中的 arm64 DMG：
+
+- [Release 页面](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-mac-ready)
+- [DMG 直接下载](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-mac-ready/HARRY.Translate_0.2.0_aarch64.dmg)
+
+文件大小为 `22,208,525` 字节，SHA-256：
+
+```text
+eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
+```
+
+校验：
+
+```bash
+shasum -a 256 \
+  "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+```
+
+Release 还提供 `.sha256` sidecar，可用：
+
+```bash
+cd "$HOME/Downloads"
+shasum -a 256 -c \
+  HARRY.Translate_0.2.0_aarch64.dmg.sha256
+```
+
+安装：
+
+1. 打开 DMG；
+2. 将 `HARRY Translate.app` 拖入 Applications；
+3. 从 Applications 启动；
+4. 若 Gatekeeper 拦截，在 Finder 中按住 Control 点击应用并选择“打开”；
+5. 如仍被阻止，进入“系统设置 > 隐私与安全性”，在对应应用提示旁选择
+   “仍要打开”。
+
+该应用是 ad-hoc 签名，未完成 Apple Developer 签名和 notarization。
+不要关闭全局 Gatekeeper，也不要绕过系统安全策略。
+
+需要自行构建时，从公开源码获取：
 
 ```bash
 git clone https://github.com/xiaokunshi5-lang/harry-translate-v2-mac.git
