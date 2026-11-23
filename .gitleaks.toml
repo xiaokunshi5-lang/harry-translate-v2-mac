@@ -1,0 +1,11 @@
+title = "HARRY Translate V2 secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exact dummy API keys used by unit tests; never add real credentials here."
+regexTarget = "match"
+regexes = [
+  '''sk-(?:test1234567890abcd|ws-private123|your-dashscope-api-key-here|existing987654321|preloaded-secret-1234)''',
+]

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "default_provider": "qwen",
+  "providers": {
+    "qwen": {
+      "id": "qwen",
+      "label": "Qwen LiveTranslate",
+      "engine": "qwen_realtime",
+      "model": "qwen3.8-livetranslate-flash-realtime",
+      "default": true,
+      "connection_rpm": 10,
+      "source_detection": "automatic",
+      "source_languages": [
+        "auto",
+        "zh",
+        "en",
+        "fr",
+        "es",
+        "it",
+        "ja",
+        "ko",
+        "de"
+      ],
+      "target_languages": [
+        "zh",
+        "en",
+        "fr",
+        "es",
+        "it",
+        "ja",
+        "ko",
+        "de"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "limitations": [
+        "qwen38_source_language_is_detected_automatically",
+        "workspace_id_is_required_in_the_private_maas_hostname",
+        "rpm_limits_websocket_connection_creation"
+      ],
+      "source_reference": "REV-01 / ADR-007-rev01-qwen38-spec.md"
+    },
+    "openai_compatible": {
+      "id": "openai_compatible",
+      "label": "OpenAI-compatible realtime",
+      "engine": "openai_compatible",
+      "model": "",
+      "default": false,
+      "connection_rpm": 10,
+      "source_detection": "provider_defined",
+      "source_languages": [
+        "auto",
+        "zh",
+        "en",
+        "fr",
+        "es",
+        "it",
+        "ja",
+        "ko",
+        "de"
+      ],
+      "target_languages": [
+        "zh",
+        "en",
+        "fr",
+        "es",
+        "it",
+        "ja",
+        "ko",
+        "de"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "limitations": [
+        "skeleton_only_until_provider_is_implemented"
+      ]
+    }
+  }
+}

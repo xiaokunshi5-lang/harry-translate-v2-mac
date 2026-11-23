@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>会议实时同传系统 - Qwen 实时双通道同传</title>
+    <link rel="icon" href="data:,">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* 顶部导航控制栏 */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 24px;
+            background: #0d1117;
+            border-bottom: 1px solid #1c2333;
+            z-index: 10;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .screen-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #38bdf8;
+            letter-spacing: 0.5px;
+        }
+        .status-badge {
+            font-size: 13px;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: #94a3b8;
+            font-weight: 500;
+        }
+        .dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 6px #ef4444;
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        .dot.connected {
+            background-color: #10b981;
+            box-shadow: 0 0 8px #10b981;
+        }
+        .dot.connecting {
+            background-color: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+        .dot.error {
+            background-color: #ef4444;
+            box-shadow: 0 0 8px #ef4444;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        button, a.btn-link {
+            background: #161d28;
+            color: #cbd5e1;
+            border: 1px solid #2a364a;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+        }
+        button:hover, a.btn-link:hover {
+            background: #222d40;
+            border-color: #3b4c68;
+            color: #ffffff;
+        }
+
+        /* 主体布局 */
+        #main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 单屏字幕滚动区 */
+        .subtitle-panel {
+            flex: 1;
+            padding: 40px 60px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+            scroll-behavior: smooth;
+        }
+        .subtitle-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+        .subtitle-panel::-webkit-scrollbar-thumb {
+            background: #1e2532;
+            border-radius: 4px;
+        }
+
+        /* 双栏分屏样式 */
+        .split-view {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .split-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .split-column:first-child {
+            border-right: 2px solid #161d28;
+        }
+        .column-header {
+            padding: 10px 24px;
+            background: #0f1520;
+            border-bottom: 1px solid #1c2434;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .column-header.en { color: #38bdf8; }
+        .column-header.zh { color: #facc15; }
+
+        /* 句子卡片 */
+        .sentence-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px 18px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+        .source-text {
+            font-size: var(--src-font, 24px);
+            color: #94a3b8;
+            font-weight: 400;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .target-text {
+            font-size: var(--trans-font, 36px);
+            color: #facc15;
+            font-weight: 600;
+            line-height: 1.35;
+            letter-spacing: 0.4px;
+            word-break: break-word;
+        }
+        .current-active {
+            border-left: 4px solid #38bdf8;
+            background: rgba(56, 189, 248, 0.04);
+        }
+        .current-active .target-text::after {
+            content: "▋";
+            color: #38bdf8;
+            animation: blink 0.8s infinite;
+            margin-left: 6px;
+            font-size: 0.85em;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .empty-placeholder {
+            margin: auto;
+            text-align: center;
+            color: #475569;
+            font-size: 20px;
+            letter-spacing: 1px;
+        }
+
+        /* 主控仪表板入口样式 (访问 / 时的界面) */
+        .dashboard-view {
+            margin: auto;
+            max-width: 860px;
+            padding: 36px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+        .dash-title {
+            font-size: 30px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }
+        .dash-desc {
+            font-size: 15px;
+            color: #94a3b8;
+            line-height: 1.6;
+        }
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 18px;
+            margin-top: 6px;
+        }
+        .dash-card {
+            background: #0f1520;
+            border: 1px solid #1f2a3e;
+            border-radius: 8px;
+            padding: 24px 18px;
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: all 0.25s ease;
+        }
+        .dash-card:hover {
+            transform: translateY(-4px);
+            border-color: #38bdf8;
+            background: #141d2c;
+            box-shadow: 0 8px 24px rgba(56, 189, 248, 0.12);
+        }
+        .dash-card-icon {
+            font-size: 34px;
+        }
+        .dash-card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        .dash-card-subtitle {
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+        .badge-role {
+            display: inline-block;
+            font-size: 12px;
+            padding: 3px 9px;
+            border-radius: 20px;
+            font-weight: 500;
+            align-self: center;
+        }
+        .badge-en { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+        .badge-zh { background: rgba(250, 204, 21, 0.15); color: #facc15; }
+        .badge-split { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+
+        @media (max-width: 720px) {
+            header {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 8px;
+                padding: 10px 14px;
+            }
+            .header-left {
+                flex-wrap: wrap;
+                gap: 8px 12px;
+                width: 100%;
+            }
+            .screen-title {
+                font-size: 14px;
+                line-height: 1.35;
+            }
+            .status-badge {
+                font-size: 12px;
+                line-height: 1.35;
+            }
+            .controls {
+                width: 100%;
+                overflow-x: auto;
+                padding-bottom: 2px;
+            }
+            .controls button,
+            .controls .btn-link {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+            .dashboard-view {
+                width: 100%;
+                padding: 24px 16px;
+                margin: 0 auto;
+                overflow-y: auto;
+            }
+            .dash-title {
+                font-size: 24px;
+                line-height: 1.25;
+            }
+            .dash-desc {
+                font-size: 14px;
+            }
+            .dash-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            .dash-card {
+                padding: 18px;
+                text-align: left;
+            }
+            .subtitle-panel {
+                padding: 24px 20px;
+            }
+            .split-view {
+                flex-direction: column;
+                overflow-y: auto;
+            }
+            .split-column {
+                min-height: 42vh;
+            }
+            .split-column:first-child {
+                border-right: none;
+                border-bottom: 2px solid #161d28;
+            }
+            .column-header {
+                flex-wrap: wrap;
+                gap: 6px;
+                padding: 8px 12px;
+            }
+            .column-header > span:last-child {
+                width: 100%;
+            }
+        }
+
+    </style>
+</head>
+<body style="--src-font: 24px; --trans-font: 36px;">
+
+    <header>
+        <div class="header-left">
+            <span class="screen-title" id="page-title">会议双通道实时同传系统</span>
+            <div class="status-badge" id="status-badge">
+                <span class="dot" id="ws-dot"></span>
+                <span id="ws-status">正在连接通道...</span>
+            </div>
+        </div>
+        <div class="controls" id="header-controls">
+            <a href="/" class="btn-link" id="btn-home" style="display: none;">主控面板</a>
+            <button onclick="changeFontSize(2)">字体 +</button>
+            <button onclick="changeFontSize(-2)">字体 -</button>
+            <button onclick="clearScreen()">清屏</button>
+            <button onclick="toggleFullScreen()">全屏模式 (F11)</button>
+        </div>
+    </header>
+
+    <div id="main-container">
+        <!-- 动态由 JavaScript 根据路由加载对应视图 -->
+    </div>
+
+    <script>
+        // 最大 DOM 卡片缓存数量（防长时间会议内存膨胀）
+        const MAX_CARDS = 100;
+
+        const mainContainer = document.getElementById("main-container");
+        const pageTitle = document.getElementById("page-title");
+        const wsDot = document.getElementById("ws-dot");
+        const wsStatus = document.getElementById("ws-status");
+        const btnHome = document.getElementById("btn-home");
+
+        function setConnectionState(dotElem, statusElem, state, reason, prefix) {
+            if (dotElem) {
+                dotElem.classList.remove("connected", "connecting", "error");
+                if (state === "ready") dotElem.classList.add("connected");
+                else if (state === "connecting" || state === "reconnecting" || state === "idle") {
+                    dotElem.classList.add("connecting");
+                } else {
+                    dotElem.classList.add("error");
+                }
+            }
+            if (!statusElem) return;
+
+            const labels = {
+                idle: reason === "needs_setup" ? "未配置 API Key" : "等待连接",
+                connecting: "引擎连接中",
+                ready: "引擎已就绪",
+                reconnecting: "连接中断，正在重连",
+                auth_error: "鉴权失败",
+                quota_error: "额度或限流异常",
+                audio_error: "麦克风不可用",
+                closed: "连接已关闭"
+            };
+            let text = `${prefix}: ${labels[state] || "状态未知"}`;
+            if (reason && state !== "ready" && state !== "idle") {
+                text += ` (${reason})`;
+            }
+            statusElem.innerText = text;
+        }
+
+        // 解析当前路由模式
+        const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+        let mode = "dashboard";
+        if (pathname === "/en") mode = "en";
+        else if (pathname === "/zh") mode = "zh";
+        else if (pathname === "/split") mode = "split";
+
+        const splitChannelStates = {
+            en: { state: "idle", reason: "" },
+            zh: { state: "idle", reason: "" }
+        };
+
+        function updateSplitHeader() {
+            const channels = [splitChannelStates.en, splitChannelStates.zh];
+            const errorStates = new Set([
+                "auth_error",
+                "quota_error",
+                "audio_error",
+                "closed"
+            ]);
+            wsDot.classList.remove("connected", "connecting", "error");
+            if (channels.some((channel) => errorStates.has(channel.state))) {
+                wsDot.classList.add("error");
+                wsStatus.innerText = "双通道存在异常";
+                return;
+            }
+            if (channels.every((channel) => channel.state === "ready")) {
+                wsDot.classList.add("connected");
+                wsStatus.innerText = "双通道引擎已就绪";
+                return;
+            }
+            wsDot.classList.add("connecting");
+            if (channels.some((channel) => channel.reason === "needs_setup")) {
+                wsStatus.innerText = "双通道未配置 API Key";
+            } else {
+                wsStatus.innerText = "双通道连接中";
+            }
+        }
+
+        // 单通道状态追踪
+        class ChannelStreamHandler {
+            constructor(channelName, containerElement) {
+                this.channel = channelName;
+                this.container = containerElement;
+                this.activeCard = null;
+                this.currentSentenceId = null;
+                this.ws = null;
+            }
+
+            connect(dotElem, statusElem, statusPrefix) {
+                const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+                this.ws = new WebSocket(`${protocol}//${location.host}/ws/${this.channel}`);
+
+                this.ws.onopen = () => {
+                    setConnectionState(dotElem, statusElem, "connecting", "", statusPrefix);
+                    if (mode === "split") {
+                        splitChannelStates[this.channel] = { state: "connecting", reason: "" };
+                        updateSplitHeader();
+                    }
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === "engine_state") {
+                            if (mode === "split") {
+                                splitChannelStates[this.channel] = {
+                                    state: data.state,
+                                    reason: data.reason || ""
+                                };
+                                updateSplitHeader();
+                            }
+                            setConnectionState(
+                                dotElem,
+                                statusElem,
+                                data.state,
+                                data.reason || "",
+                                statusPrefix
+                            );
+                            return;
+                        }
+                        if (data.type === "audio_state") {
+                            if (data.state === "error") {
+                                if (mode === "split") {
+                                    splitChannelStates[this.channel] = {
+                                        state: "audio_error",
+                                        reason: data.reason || ""
+                                    };
+                                    updateSplitHeader();
+                                }
+                                setConnectionState(
+                                    dotElem,
+                                    statusElem,
+                                    "audio_error",
+                                    data.hint || data.reason || "麦克风不可用",
+                                    statusPrefix
+                                );
+                            }
+                            return;
+                        }
+                        if (data.type === "pong") return;
+                        if (data.type === "subtitle" || data.id !== undefined) {
+                            this.handleSubtitle(data);
+                        }
+                    } catch (e) {
+                        console.error("解析字幕消息错误:", e);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    if (mode === "split") {
+                        splitChannelStates[this.channel] = {
+                            state: "closed",
+                            reason: "3 秒后重试"
+                        };
+                        updateSplitHeader();
+                    }
+                    setConnectionState(dotElem, statusElem, "closed", "3 秒后重试", statusPrefix);
+                    setTimeout(() => this.connect(dotElem, statusElem, statusPrefix), 3000);
+                };
+            }
+
+            handleSubtitle(data) {
+                const placeholder = this.container.querySelector(".empty-placeholder");
+                if (placeholder) placeholder.remove();
+
+                // 新句子
+                if (data.id !== this.currentSentenceId || !this.activeCard) {
+                    if (this.activeCard) {
+                        this.activeCard.classList.remove("current-active");
+                    }
+                    this.currentSentenceId = data.id;
+                    this.activeCard = document.createElement("div");
+                    this.activeCard.className = "sentence-card current-active";
+                    this.activeCard.innerHTML = `
+                        <div class="source-text"></div>
+                        <div class="target-text"></div>
+                    `;
+                    this.container.appendChild(this.activeCard);
+
+                    // 滑动窗口检查：超出 MAX_CARDS 则移除最旧卡片
+                    while (this.container.children.length > MAX_CARDS) {
+                        this.container.removeChild(this.container.firstElementChild);
+                    }
+                }
+
+                // 实时更新原文与译文
+                const srcElem = this.activeCard.querySelector(".source-text");
+                const transElem = this.activeCard.querySelector(".target-text");
+
+                if (data.source !== undefined && data.source !== null) {
+                    srcElem.innerText = data.source;
+                }
+                if (data.target !== undefined && data.target !== null) {
+                    transElem.innerText = data.target;
+                }
+
+                if (data.is_final) {
+                    this.activeCard.classList.remove("current-active");
+                    this.activeCard = null;
+                }
+
+                this.container.scrollTop = this.container.scrollHeight;
+            }
+
+            clear() {
+                this.container.innerHTML = "";
+                this.activeCard = null;
+                this.currentSentenceId = null;
+            }
+        }
+
+        let enHandler = null;
+        let zhHandler = null;
+
+        // 根据路由渲染视图
+        if (mode === "dashboard") {
+            btnHome.style.display = "none";
+            pageTitle.innerText = "会议双通道同传系统 - 主控台";
+            wsDot.classList.add("connected");
+            wsStatus.innerText = "本地服务在线（未进入翻译页）";
+
+            mainContainer.innerHTML = `
+                <div class="dashboard-view">
+                    <div>
+                        <div class="dash-title">会议实时双通道同传投屏系统</div>
+                        <div class="dash-desc">搭载阿里云千问 3.8 实时同传全双工大模型，支持同一麦克风拾音、中英双向独立并发同传</div>
+                    </div>
+
+                    <div class="dash-grid">
+                        <a href="/en" class="dash-card">
+                            <div class="dash-card-icon">🇺🇸</div>
+                            <span class="badge-role badge-en">面向外宾 / 英文大屏</span>
+                            <div class="dash-card-title">中译英专属大屏</div>
+                            <div class="dash-card-subtitle">中文发言实时翻译为纯正英语，可全屏投送给外宾屏幕</div>
+                        </a>
+                        <a href="/zh" class="dash-card">
+                            <div class="dash-card-icon">🇨🇳</div>
+                            <span class="badge-role badge-zh">面向中方 / 中文大屏</span>
+                            <div class="dash-card-title">英译中专属大屏</div>
+                            <div class="dash-card-subtitle">外宾英文发言实时翻译为通顺中文，可全屏投送给中方屏幕</div>
+                        </a>
+                        <a href="/split" class="dash-card">
+                            <div class="dash-card-icon">🖥️</div>
+                            <span class="badge-role badge-split">现场控台监看</span>
+                            <div class="dash-card-title">左右双栏同屏监看</div>
+                            <div class="dash-card-subtitle">在一台电脑上左侧中译英、右侧英译中，方便控台实时对照</div>
+                        </a>
+                    </div>
+                </div>
+            `;
+        } else if (mode === "en") {
+            btnHome.style.display = "inline-flex";
+            pageTitle.innerText = "中译英实时大屏 (面向外宾 / 英文受众)";
+            mainContainer.innerHTML = `
+                <div class="subtitle-panel" id="en-container">
+                    <div class="empty-placeholder">中译英通道就绪，发言时英文字幕将在此实时呈现...</div>
+                </div>
+            `;
+            const container = document.getElementById("en-container");
+            enHandler = new ChannelStreamHandler("en", container);
+            enHandler.connect(wsDot, wsStatus, "英文通道");
+        } else if (mode === "zh") {
+            btnHome.style.display = "inline-flex";
+            pageTitle.innerText = "英译中实时大屏 (面向中方 / 中文受众)";
+            mainContainer.innerHTML = `
+                <div class="subtitle-panel" id="zh-container">
+                    <div class="empty-placeholder">英译中通道就绪，发言时中文字幕将在此实时呈现...</div>
+                </div>
+            `;
+            const container = document.getElementById("zh-container");
+            zhHandler = new ChannelStreamHandler("zh", container);
+            zhHandler.connect(wsDot, wsStatus, "中文通道");
+        } else if (mode === "split") {
+            btnHome.style.display = "inline-flex";
+            pageTitle.innerText = "双向同传对照监看屏 (左右分栏)";
+            updateSplitHeader();
+
+            mainContainer.innerHTML = `
+                <div class="split-view">
+                    <div class="split-column">
+                        <div class="column-header en">
+                            <span>🇺🇸 中译英实时流 (面向外宾)</span>
+                            <span id="split-en-status" style="font-size: 12px; font-weight: normal; color: #94a3b8;">连接中...</span>
+                        </div>
+                        <div class="subtitle-panel" id="split-en-container">
+                            <div class="empty-placeholder">等待发言...</div>
+                        </div>
+                    </div>
+                    <div class="split-column">
+                        <div class="column-header zh">
+                            <span>🇨🇳 英译中实时流 (面向中方)</span>
+                            <span id="split-zh-status" style="font-size: 12px; font-weight: normal; color: #94a3b8;">连接中...</span>
+                        </div>
+                        <div class="subtitle-panel" id="split-zh-container">
+                            <div class="empty-placeholder">等待发言...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const enContainer = document.getElementById("split-en-container");
+            const zhContainer = document.getElementById("split-zh-container");
+            const splitEnStatus = document.getElementById("split-en-status");
+            const splitZhStatus = document.getElementById("split-zh-status");
+
+            enHandler = new ChannelStreamHandler("en", enContainer);
+            enHandler.connect(null, splitEnStatus, "英文通道");
+
+            zhHandler = new ChannelStreamHandler("zh", zhContainer);
+            zhHandler.connect(null, splitZhStatus, "中文通道");
+        }
+
+        // 字号调节
+        function changeFontSize(delta) {
+            const body = document.body;
+            let curTrans = parseInt(getComputedStyle(body).getPropertyValue('--trans-font'));
+            let curSrc = parseInt(getComputedStyle(body).getPropertyValue('--src-font'));
+            curTrans = Math.max(18, Math.min(64, curTrans + delta));
+            curSrc = Math.max(14, Math.min(48, curSrc + delta));
+            body.style.setProperty('--trans-font', `${curTrans}px`);
+            body.style.setProperty('--src-font', `${curSrc}px`);
+        }
+
+        // 清屏
+        function clearScreen() {
+            if (enHandler) enHandler.clear();
+            if (zhHandler) zhHandler.clear();
+        }
+
+        // 全屏切换
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    alert(`全屏切换失败: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+    </script>
+</body>
+</html>

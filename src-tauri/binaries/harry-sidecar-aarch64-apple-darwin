@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Development externalBin placeholder replaced by the standalone sidecar binary during R16 packaging.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+ROOT_DIR="${HARRY_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+if [[ -x "$ROOT_DIR/.venv-v2/bin/python" ]]; then
+  exec "$ROOT_DIR/.venv-v2/bin/python" -m app.main "$@"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  exec "$ROOT_DIR/.venv/bin/python" -m app.main "$@"
+else
+  exec python3 -m app.main "$@"
+fi

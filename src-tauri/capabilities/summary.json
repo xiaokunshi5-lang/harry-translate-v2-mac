@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "summary",
+  "description": "Least-privilege capabilities for the independent summary window.",
+  "windows": ["summary"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:deny-internal-toggle-maximize"
+  ]
+}

@@ -1,0 +1,248 @@
+/* Overlay chrome adapted from MIT yuxino/Mimi (commit bce7164, v1.7.6). */
+
+html:has(.overlay-stage:not(.overlay-stage--browser)),
+body:has(.overlay-stage:not(.overlay-stage--browser)),
+#root:has(.overlay-stage:not(.overlay-stage--browser)) {
+  background: transparent !important;
+  min-width: 0 !important;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.overlay-stage {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  background: transparent;
+  overflow-x: hidden;
+}
+
+.overlay-stage:not(.overlay-stage--browser) {
+  height: 100vh;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.overlay-stage--browser {
+  position: relative;
+  min-height: 100vh;
+  padding: 24px;
+  background: #0e1714;
+}
+
+.overlay-window {
+  position: relative;
+  box-sizing: border-box;
+  border-radius: 16px;
+  border: 1px solid var(--overlay-canvas-outline, rgba(255, 255, 255, 0.12));
+  color: #f4f7f5;
+  overflow: hidden;
+  user-select: none;
+  transition: border-color 120ms ease;
+}
+
+.overlay-window:hover {
+  border-color: rgba(122, 168, 255, 0.34);
+}
+
+.overlay-window--locked {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.overlay-window--locked:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.overlay-window--immersive {
+  border-color: transparent;
+  border-radius: 0;
+  pointer-events: none;
+}
+
+.overlay-window--immersive:hover {
+  border-color: transparent;
+}
+
+.overlay-window--collapsed {
+  border-radius: 999px;
+}
+
+.overlay-drag-surface {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  cursor: grab;
+}
+
+.overlay-drag-surface:active {
+  cursor: grabbing;
+}
+
+.overlay-capsule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.overlay-capsule__status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: rgba(244, 247, 245, 0.88);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.overlay-capsule__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #f59e0b;
+}
+
+.overlay-capsule__dot.is-ready {
+  background: #2dd4bf;
+}
+
+.overlay-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: stretch;
+  gap: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.overlay-body--immersive {
+  overflow: hidden;
+}
+
+.overlay-subtitle-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.overlay-minibar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.overlay-minibar__label {
+  overflow: hidden;
+  color: #f4f7f5;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-debug-bar {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  gap: 6px;
+}
+
+.overlay-debug-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  color: #f4f7f5;
+  background: rgba(20, 31, 27, 0.88);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.overlay-resize-handle {
+  position: absolute;
+  z-index: 20;
+}
+
+.overlay-resize-handle--n {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.overlay-resize-handle--s {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.overlay-resize-handle--e {
+  top: 10px;
+  bottom: 10px;
+  right: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.overlay-resize-handle--w {
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.overlay-resize-handle--ne {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.overlay-resize-handle--nw {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.overlay-resize-handle--se {
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.overlay-resize-handle--sw {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}

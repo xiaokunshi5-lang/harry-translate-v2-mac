@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>HARRY Translate requires microphone access to capture live speech for real-time translation.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>HARRY Translate requires system audio capture access to transcribe meeting and media audio in real time.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>HARRY Translate uses screen and audio capture permissions on macOS to capture system audio without virtual audio drivers.</string>
+</dict>
+</plist>

@@ -1,0 +1,5 @@
+# Minimum supported Rust version is 1.90 (aligned with yuxino/Mimi Cargo.toml rust-version = "1.90").
+# Exact crate versions are locked in src-tauri/Cargo.lock.
+[toolchain]
+channel = "stable"
+targets = ["aarch64-apple-darwin"]

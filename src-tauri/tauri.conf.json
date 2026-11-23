@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HARRY Translate",
+  "version": "0.2.0",
+  "identifier": "com.harry.translate.mac",
+  "build": {
+    "beforeDevCommand": "if [ -d ../frontend ]; then npm --prefix ../frontend run dev; else npm --prefix frontend run dev; fi",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "if [ -d ../frontend ]; then npm --prefix ../frontend run build; else npm --prefix frontend run build; fi",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "withGlobalTauri": false,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "overlay",
+        "url": "/hud",
+        "title": "HARRY Translate",
+        "x": 200,
+        "y": 120,
+        "width": 580,
+        "height": 240,
+        "minWidth": 280,
+        "minHeight": 54,
+        "maxWidth": 1200,
+        "maxHeight": 600,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "acceptFirstMouse": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
+    }
+  }
+}

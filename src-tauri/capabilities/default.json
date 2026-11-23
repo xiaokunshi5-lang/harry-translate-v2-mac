@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal default capabilities for HARRY Translate Mac windows.",
+  "windows": ["overlay", "settings"],
+  "permissions": [
+    "core:default",
+    "core:event:default"
+  ]
+}

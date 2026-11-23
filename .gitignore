@@ -1,0 +1,64 @@
+# Secrets and local runtimes
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+*.key
+*.pem
+*.token
+*.p12
+*.pfx
+*.p8
+*.mobileprovision
+.envrc
+.direnv/
+secrets/
+credentials/
+.venv/
+.venv-*/
+venv/
+
+# macOS and editor metadata
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Frontend and desktop build output
+node_modules/
+dist/
+dist-ssr/
+src-tauri/target/
+src-tauri/gen/
+release/
+
+# Local runtime state and generated artifacts
+.tmp/
+logs/*
+!logs/.gitignore
+exports/*
+!exports/.gitignore
+config/user_settings.json
+config/user_settings.*.json
+config/user_settings.corrupt-*.json
+config/*.local.json
+config/*.lock
+config/.*.tmp
+
+# Local historical material; the archive policy itself remains tracked.
+归档/_local/
+
+# Local QA artifacts
+.artifacts/
+screenshots/
+*.log

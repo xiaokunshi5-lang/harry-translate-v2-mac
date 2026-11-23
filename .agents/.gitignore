@@ -1,0 +1,8 @@
+# 过程数据与本地快照默认不入库；长期项目知识显式放行。
+*
+!.gitignore
+!PROJECT_CONTRACT.md
+!decisions/
+!decisions/**
+!fitness/
+!fitness/**

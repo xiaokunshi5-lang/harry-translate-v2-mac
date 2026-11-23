@@ -1,0 +1,69 @@
+[package]
+name = "harry-translate-mac"
+version = "0.2.0"
+description = "HARRY Translate V2 Apple Silicon Mac real-time translation single-window overlay"
+authors = ["HARRY Translate Contributors"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "harry_translate_mac_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+parking_lot = "0.12"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "NSGeometry",
+    "NSNotification",
+    "NSOperation",
+    "NSString",
+    "NSObject",
+    "NSArray",
+    "NSThread",
+    "NSRunLoop",
+    "NSValue",
+    "NSZone",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-foundation",
+    "NSWindow",
+    "NSPanel",
+    "NSScreen",
+    "NSView",
+    "NSEvent",
+    "NSWorkspace",
+    "NSTrackingArea",
+    "NSResponder",
+    "NSApplication",
+    "NSGraphics",
+    "NSColor",
+    "NSRunningApplication",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std"] }
+block2 = "0.6"
+dispatch2 = "0.3"
+tauri-nspanel = "=2.1.1"
+tauri-plugin-single-instance = "=2.4.3"
