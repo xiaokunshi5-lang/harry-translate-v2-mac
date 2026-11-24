@@ -80,8 +80,8 @@ Dock、Finder、应用菜单、托盘和 `Cmd+,` 都能把它叫回来，也不�
 | 性能记录 | 基线 `0.000984 ms`，当前 `0.000698 ms` |
 | 真实 arm64 打包与 `PACKAGE-LIFECYCLE` | PASS |
 | `hdiutil verify` | VALID |
-| Gitleaks 私人 Git 历史（最终 51 个提交） | 无泄漏 |
-| Gitleaks 公开 Git 历史（3 个提交） | 无泄漏 |
+| Gitleaks 私人 R18 Git 历史 | 无泄漏 |
+| Gitleaks 公开发布 Git 历史 | 无泄漏 |
 | 实际签名报告 | `adhoc_local`、`notarized=false`、无 staple、`signing_target=app` |
 
 看门狗 0 至 5 的通过记录来自 `47c3480` 的代码验收状态。验收后新增本契约与
