@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, LogicalPosition, LogicalSize, Manager, Position, Size, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -34,6 +34,7 @@ pub struct SharedAppState {
     pub pointer: Arc<Mutex<PointerPassThroughState>>,
     pub summary: Arc<Mutex<SummaryWindowState>>,
     pub geometry_revision: Arc<AtomicU64>,
+    pub quitting: Arc<AtomicBool>,
 }
 
 pub struct OverlayControlServer {
@@ -240,8 +241,18 @@ fn collect_native_diagnostics(app: &tauri::AppHandle) -> Result<OverlayNativeDia
     Ok(OverlayNativeDiagnostics { overlay, summary })
 }
 
-fn register_with_sidecar(endpoint: &SidecarEndpoint, control_url: &str) -> Result<(), String> {
-    let body = serde_json::json!({ "control_url": control_url }).to_string();
+fn register_with_sidecar(
+    endpoint: &SidecarEndpoint,
+    control_url: &str,
+    visible: bool,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let body = serde_json::json!({
+        "control_url": control_url,
+        "visible": visible,
+    })
+    .to_string();
     let request = format!(
         "POST /api/overlay/register HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         endpoint.port,
@@ -249,18 +260,21 @@ fn register_with_sidecar(endpoint: &SidecarEndpoint, control_url: &str) -> Resul
         body
     );
     let address: SocketAddr = ([127, 0, 0, 1], endpoint.port).into();
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(500))
+    let mut stream = TcpStream::connect_timeout(&address, remaining_timeout(deadline)?)
         .map_err(|e| e.to_string())?;
     stream
-        .set_read_timeout(Some(Duration::from_millis(750)))
+        .set_write_timeout(Some(remaining_timeout(deadline)?))
         .map_err(|e| e.to_string())?;
     stream
-        .set_write_timeout(Some(Duration::from_millis(500)))
+        .set_read_timeout(Some(remaining_timeout(deadline)?))
         .map_err(|e| e.to_string())?;
     stream
         .write_all(request.as_bytes())
         .map_err(|e| e.to_string())?;
     let mut response = [0_u8; 128];
+    stream
+        .set_read_timeout(Some(remaining_timeout(deadline)?))
+        .map_err(|e| e.to_string())?;
     let read = stream.read(&mut response).map_err(|e| e.to_string())?;
     let head = String::from_utf8_lossy(&response[..read]);
     if head.starts_with("HTTP/1.1 2") || head.starts_with("HTTP/1.0 2") {
@@ -270,11 +284,104 @@ fn register_with_sidecar(endpoint: &SidecarEndpoint, control_url: &str) -> Resul
     }
 }
 
-pub(crate) fn register_overlay_control(endpoint: &SidecarEndpoint, control_url: String) {
+fn remaining_timeout(deadline: Instant) -> Result<Duration, String> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err("overlay_control_registration_timeout".to_string())
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn request_overlay_hide(endpoint: &SidecarEndpoint) -> Result<(), String> {
+    let address: SocketAddr = ([127, 0, 0, 1], endpoint.port).into();
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(600))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(600)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(1_500)))
+        .map_err(|error| error.to_string())?;
+    let request = format!(
+        "POST /api/overlay/hide HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        endpoint.port
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut response = [0_u8; 128];
+    let read = stream
+        .read(&mut response)
+        .map_err(|error| error.to_string())?;
+    let head = String::from_utf8_lossy(&response[..read]);
+    if head.starts_with("HTTP/1.1 2") || head.starts_with("HTTP/1.0 2") {
+        Ok(())
+    } else {
+        Err(format!("overlay_hide_rejected: {head}"))
+    }
+}
+
+pub(crate) fn request_application_exit(app: tauri::AppHandle) {
+    let Some(state) = app.try_state::<SharedAppState>() else {
+        app.exit(0);
+        return;
+    };
+    let sidecar = Arc::clone(&state.sidecar);
+    let quitting = Arc::clone(&state.quitting);
+    if quitting
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    thread::spawn(move || {
+        if let Some(endpoint) = sidecar.current_endpoint() {
+            if let Err(error) = request_overlay_hide(&endpoint) {
+                tracing::warn!("application exit could not hide overlay cleanly: {error}");
+            }
+        }
+        sidecar.shutdown_for_application_exit();
+        app.exit(0);
+    });
+}
+
+pub(crate) fn register_overlay_control_blocking(
+    endpoint: &SidecarEndpoint,
+    control_url: String,
+    visible: bool,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_millis(225);
+    let mut last_error = "overlay_control_registration_timeout".to_string();
+    for _attempt in 0..3 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let timeout = remaining.min(Duration::from_millis(75));
+        match register_with_sidecar(endpoint, &control_url, visible, timeout) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+pub(crate) fn register_overlay_control(
+    endpoint: &SidecarEndpoint,
+    control_url: String,
+    visible: bool,
+) {
     let endpoint = endpoint.clone();
     thread::spawn(move || {
         for attempt in 0..3 {
-            match register_with_sidecar(&endpoint, &control_url) {
+            match register_with_sidecar(
+                &endpoint,
+                &control_url,
+                visible,
+                Duration::from_millis(750),
+            ) {
                 Ok(()) => return,
                 Err(error) if attempt < 2 => {
                     tracing::debug!(
@@ -398,11 +505,31 @@ pub(crate) fn sync_overlay_to_sidecar(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
+pub fn app_quit(app: tauri::AppHandle) -> Result<(), String> {
+    request_application_exit(app);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_backend_endpoint(state: State<'_, SharedAppState>) -> Result<SidecarEndpoint, String> {
     if let Some(endpoint) = state.sidecar.current_endpoint() {
         return Ok(endpoint);
     }
     Err("sidecar_not_ready".to_string())
+}
+
+#[tauri::command]
+pub fn open_auxiliary_monitor_in_browser(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<SharedAppState>()
+        .ok_or_else(|| "overlay_state_missing".to_string())?;
+    let endpoint = state
+        .sidecar
+        .current_endpoint()
+        .ok_or_else(|| "sidecar_not_ready".to_string())?;
+    app.opener()
+        .open_url(endpoint.base_url, None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

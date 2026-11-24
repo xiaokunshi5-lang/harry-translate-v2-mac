@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,130 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+RELEASE_BUNDLE_ROOT = (
+    ROOT / "src-tauri" / "target" / "aarch64-apple-darwin" / "release" / "bundle"
+)
+
+
+def classify_signature_details(details: str) -> str:
+    normalized = details.replace("\r", "\n")
+    if "Authority=Developer ID Application:" in normalized:
+        return "developer_id"
+    if re.search(r"Signature=(?:adhoc|ad hoc)", normalized, re.IGNORECASE):
+        return "adhoc_local"
+    if "TeamIdentifier=not set" in normalized and "Identifier=" in normalized:
+        return "adhoc_local"
+    if "code object is not signed at all" in normalized:
+        return "unsigned_local"
+    return "unknown"
+
+
+def command_output(command: list[str], timeout: float = 20.0) -> tuple[int, str]:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 127, str(error)
+    return result.returncode, f"{result.stdout}\n{result.stderr}".strip()
+
+
+def find_release_artifact(directory: Path, suffix: str) -> Path | None:
+    if not directory.is_dir():
+        return None
+    candidates = sorted(
+        (path for path in directory.iterdir() if path.name.endswith(suffix)),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def has_stapled_ticket(target: Path | None) -> bool:
+    if target is None or not target.exists():
+        return False
+    code, _output = command_output(
+        ["xcrun", "stapler", "validate", str(target)],
+        timeout=30,
+    )
+    return code == 0
+
+
+def gatekeeper_assessment(target: Path | None, target_type: str) -> tuple[bool, bool]:
+    if target is not None and target.exists():
+        code, output = command_output(
+            ["spctl", "-a", "-vvv", "-t", target_type, str(target)],
+            timeout=30,
+        )
+    else:
+        return False, False
+    accepted = code == 0
+    notarized_marker = "Notarized Developer ID" in output
+    return accepted, notarized_marker
+
+
+def inspect_signature(
+    *,
+    app: Path | None,
+    dmg: Path | None,
+    binary: Path | None,
+) -> dict[str, object]:
+    target = app or dmg or binary
+    details = ""
+    raw_mode = "unavailable"
+    target_kind = "missing"
+    if target is not None and target.exists():
+        target_kind = "app" if target == app else "dmg" if target == dmg else "sidecar"
+        _code, details = command_output(
+            ["codesign", "-dv", "--verbose=4", str(target)],
+            timeout=20,
+        )
+        raw_mode = classify_signature_details(details)
+
+    app_stapled = has_stapled_ticket(app)
+    dmg_stapled = has_stapled_ticket(dmg)
+    app_accepted, app_notarized_marker = gatekeeper_assessment(app, "install")
+    dmg_accepted, dmg_notarized_marker = gatekeeper_assessment(dmg, "open")
+    app_notarized = app_stapled or app_notarized_marker
+    dmg_notarized = dmg_stapled or dmg_notarized_marker
+    if app is not None and dmg is not None:
+        product_notarized = app_notarized and dmg_notarized
+        stapled = app_stapled and dmg_stapled
+        gatekeeper_accepted = app_accepted and dmg_accepted
+    elif app is not None:
+        product_notarized = app_notarized
+        stapled = app_stapled
+        gatekeeper_accepted = app_accepted
+    elif dmg is not None:
+        product_notarized = dmg_notarized
+        stapled = dmg_stapled
+        gatekeeper_accepted = dmg_accepted
+    else:
+        product_notarized = False
+        stapled = False
+        gatekeeper_accepted = False
+
+    if raw_mode == "developer_id":
+        signature_mode = "developer_id_notarized" if product_notarized else "developer_id_unnotarized"
+    else:
+        signature_mode = raw_mode
+
+    return {
+        "signature_mode": signature_mode,
+        "notarized": signature_mode == "developer_id_notarized",
+        "has_stapled_ticket": stapled,
+        "app_stapled": app_stapled,
+        "dmg_stapled": dmg_stapled,
+        "app_gatekeeper_accepted": app_accepted,
+        "dmg_gatekeeper_accepted": dmg_accepted,
+        "gatekeeper_accepted": gatekeeper_accepted,
+        "signing_target": target_kind,
+    }
 
 
 def check_static() -> list[str]:
@@ -148,12 +273,30 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--lifecycle", action="store_true")
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--app", type=Path)
+    parser.add_argument("--dmg", type=Path)
     args = parser.parse_args(argv)
     errors = check_static()
+    for label, path in (("app", args.app), ("dmg", args.dmg), ("binary", args.binary)):
+        if path is not None and not path.exists():
+            errors.append(f"requested {label} artifact does not exist: {path}")
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    app = args.app or find_release_artifact(RELEASE_BUNDLE_ROOT / "macos", ".app")
+    dmg = args.dmg or find_release_artifact(RELEASE_BUNDLE_ROOT / "dmg", ".dmg")
+    binary = args.binary
+    if binary is None and app is None and dmg is None:
+        candidate = (
+            ROOT
+            / "src-tauri"
+            / "binaries"
+            / "harry-sidecar-aarch64-apple-darwin"
+        )
+        binary = candidate if candidate.exists() else None
+    signature = inspect_signature(app=app, dmg=dmg, binary=binary)
+    print(f"PACKAGE-SIGNING {json.dumps(signature, ensure_ascii=False)}")
     print("PACKAGE-CHECK PASS")
     if args.check and not args.lifecycle:
         return 0

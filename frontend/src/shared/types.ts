@@ -255,11 +255,17 @@ export interface AudioInputSelectionResponse {
 }
 
 export interface OverlayStatus {
+  ok?: boolean;
+  service?: string;
   running: boolean;
   visible?: boolean;
+  realtime_enabled?: boolean;
+  gate_active?: boolean;
+  stop_error?: string | null;
   registered?: boolean;
   binary_available?: boolean;
   fallback?: string | null;
+  fallback_url?: string | null;
   control_url?: string | null;
 }
 
@@ -288,6 +294,7 @@ export interface SessionSwitchResponse {
 export interface EngineEvent {
   type: string;
   settings?: UserSettings;
+  overlay?: OverlayStatus;
   needs_setup?: boolean;
   key_mask?: string;
   state?: string;

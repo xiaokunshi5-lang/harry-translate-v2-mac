@@ -32,6 +32,7 @@ flowchart LR
     Session --> Bypass["有界纠错与总结 worker"]
     Sidecar --> Persist["单会话原子保存基础"]
     Sidecar --> Native["Tauri 宿主控制服务"]
+    Native --> Settings["原生设置窗口<br/>常规可聚焦 NSWindow"]
     Native --> Overlay["HarrySubtitlePanel"]
     Native --> Summary["可选 summary WebView"]
     Browser["React Web / Browser fallback"] --> Sidecar
@@ -47,6 +48,10 @@ flowchart LR
 6. Tauri 每 500 ms 检查 owner PID 和健康接口，连续失败后正常退出。
 7. 本地控制服务只绑定回环地址，提供 show、hide、diagnostics、shutdown。
 8. 正常关闭先请求优雅退出，再按项目路径、命令和 PID 精确兜底。
+9. 冷启动、Dock/Finder Reopen、应用菜单、托盘和第二实例统一显示原生
+   `settings` 窗口，不自动弹出隐藏的 `overlay`。
+10. `settings` 关闭时只隐藏；显式“退出应用”才停止翻译、录音、Sidecar
+    和 Tauri 宿主。
 
 不使用固定个人路径，不通过宽泛进程名杀进程，不关闭 TLS 校验。
 
@@ -151,6 +156,7 @@ Timeline 使用稳定卡片 ID、`sent_id`、`source_hash` 和 `para_id`。滚�
 | `app/transcript_exporter.py` | 单会话记录、时效保护和格式化基础 | 用户侧下载/打开仍待开放；不得删除 |
 | `src-tauri/src/sidecar.rs` | 动态端口、就绪握手、健康检查和退出回收 | 不得留下孤儿进程 |
 | `src-tauri/src/windows/native.rs` | NSPanel 转换、层级和主线程调度 | overlay 路径不得被 summary 复用 |
+| `src-tauri/src/windows/settings.rs` | 原生设置窗口创建、隐藏和恢复 | 必须是普通 NSWindow；不得连接 `/ws/main` |
 | `src-tauri/src/windows/summary.rs` | summary 窗口状态与安全重建 | 禁止动态 NSPanel destroy/close 路径 |
 | `src-tauri/src/windows/tray.rs` | 穿透后的菜单栏逃生口 | 不得删除 |
 | `src-tauri/capabilities/` | Tauri 最小权限 | 不得扩大或误删 |

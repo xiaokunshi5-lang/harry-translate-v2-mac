@@ -5,18 +5,22 @@
 
 ## 1. 获取正式版
 
-普通用户优先下载 GitHub Release 中的 arm64 DMG：
+普通用户不需要安装开发环境，按下面四步即可：
 
-- [Release 页面](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-mac-ready)
-- [DMG 直接下载](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-mac-ready/HARRY.Translate_0.2.0_aarch64.dmg)
+1. 从 [R18 Release](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-r18-ready)
+   下载 `HARRY.Translate_0.2.0_aarch64.dmg`。
+2. 双击 DMG，将 `HARRY Translate.app` 拖入「应用程序」。
+3. 从「应用程序」启动，在设置页填写自己的 DashScope API Key。
+4. 打开实时翻译开关。未开启时，应用不会采集音频或向云端推流。
 
-文件大小为 `22,208,525` 字节，SHA-256：
+[直接下载 DMG](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-r18-ready/HARRY.Translate_0.2.0_aarch64.dmg)。
+文件大小为 `22,222,266` 字节，SHA-256：
 
 ```text
-eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
+d3f919480afedac359eee8cb26f7848b5bc751cc571da0dd626d71ce96b1efbf
 ```
 
-校验：
+校验文件是否与本次验收包一致：
 
 ```bash
 shasum -a 256 \
@@ -31,17 +35,32 @@ shasum -a 256 -c \
   HARRY.Translate_0.2.0_aarch64.dmg.sha256
 ```
 
-安装：
+检查磁盘映像结构：
 
-1. 打开 DMG；
-2. 将 `HARRY Translate.app` 拖入 Applications；
+```bash
+hdiutil verify \
+  "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+```
+
+建议先校验再安装：
+
+1. 确认上面的 SHA-256 与下面的 `hdiutil verify` 均通过；
+2. 打开 DMG，将 `HARRY Translate.app` 拖入 Applications；
 3. 从 Applications 启动；
-4. 若 Gatekeeper 拦截，在 Finder 中按住 Control 点击应用并选择“打开”；
-5. 如仍被阻止，进入“系统设置 > 隐私与安全性”，在对应应用提示旁选择
-   “仍要打开”。
+4. 若出现“已损坏，无法打开”，先确认上面的 SHA-256 与
+   `hdiutil verify` 均通过；
+5. 把应用拖入 Applications 后，仅对该应用执行：
 
-该应用是 ad-hoc 签名，未完成 Apple Developer 签名和 notarization。
-不要关闭全局 Gatekeeper，也不要绕过系统安全策略。
+```bash
+xattr -dr com.apple.quarantine "/Applications/HARRY Translate.app"
+```
+
+6. 再次从 Applications 启动。也可以尝试在 Finder 中按住 Control 点击
+   应用并选择“打开”，或进入“系统设置 > 隐私与安全性”选择“仍要打开”。
+
+该应用是 ad-hoc 签名，未完成 Apple Developer 签名和 notarization。上述
+命令只清除单个 HARRY 应用的 quarantine，不会关闭系统全局 Gatekeeper。
+哈希或 DMG 结构校验失败时必须重新下载，不能放行。
 
 需要自行构建时，从公开源码获取：
 
@@ -50,7 +69,7 @@ git clone https://github.com/xiaokunshi5-lang/harry-translate-v2-mac.git
 cd harry-translate-v2-mac
 ```
 
-也可以直接使用桌面的干净发布目录。不要在旧归档目录中安装或构建。
+不要从旧下载目录或历史归档中构建，始终使用这份干净的公开克隆。
 
 ## 2. 前置环境
 
@@ -183,7 +202,7 @@ cargo build --offline --features custom-protocol --manifest-path src-tauri/Cargo
 ./启动桌面悬浮窗.command
 ```
 
-不自动打开浏览器配置页：
+不自动显示原生设置窗口：
 
 ```bash
 ./启动桌面悬浮窗.command --no-open-settings
@@ -300,6 +319,40 @@ uv run pyinstaller --version
 ./scripts/package-app.sh
 ```
 
+没有证书时会直接产出完整的 ad-hoc DMG，不会阻断本地复现。先检查当前
+发布轨道：
+
+```bash
+./scripts/macos/prepare-macos-release.sh --check
+```
+
+输出中的 `projected signature mode: adhoc_local` 表示未使用 Developer ID，
+产物不能宣称为已签名或已公证；最终以 package 校验器的实际字段为准。
+
+如果发布机已在本机钥匙串安装 Developer ID Application 证书，并配置了
+公证凭据，可用同一脚本启用正式轨道。二选一：
+
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: ..."
+export APPLE_NOTARY_KEYCHAIN_PROFILE="harry-notary-profile"
+./scripts/package-app.sh
+```
+
+或使用 App Store Connect API Key：
+
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: ..."
+export APPLE_API_KEY_PATH="/path/to/AuthKey_XXXXXXXXXX.p8"
+export APPLE_API_KEY="KEY_ID"
+export APPLE_API_ISSUER="ISSUER_UUID"
+./scripts/package-app.sh
+```
+
+脚本也兼容 `APPLE_API_KEY=/path/to/AuthKey.p8` 加
+`APPLE_API_KEY_ID=KEY_ID`。凭据只从本机环境读取，不得提交密钥、`.p12`、
+`.p8`、密码或 Team API Token。正式轨道会先签内层 sidecar，再校验 app，
+提交 DMG；只有 Apple 返回 `Accepted` 后才 staple 并执行 `spctl` 验收。
+
 产物：
 
 ```text
@@ -323,11 +376,13 @@ hdiutil imageinfo \
 当前已验证 SHA-256：
 
 ```text
-eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
+d3f919480afedac359eee8cb26f7848b5bc751cc571da0dd626d71ce96b1efbf
 ```
 
-若重新构建，哈希可能变化，应重新记录。该产物是 ad-hoc 构建，没有 Apple
-Developer 签名和 notarization，首次打开可能需要人工确认。
+若重新构建，哈希可能变化，应重新记录。检查脚本会输出
+`signature_mode`、`notarized`、`has_stapled_ticket` 等字段。没有商业证书的
+环境只允许报告 `adhoc_local` 和 `notarized: false`，首次打开按第 1 节执行
+单应用 quarantine 止损。
 
 ## 11. 依赖与安全检查
 
@@ -357,11 +412,12 @@ cd ..
 
 正常退出方式：
 
-1. 在 `harry-tray` 选择“退出悬浮窗”；或
-2. 关闭启动器终端；或
-3. 正常结束后端进程。
+1. 在原生设置窗口选择“退出应用”；
+2. 使用菜单 `HARRY Translate > 退出 HARRY Translate` 或 `Command + Q`；
+3. 在 `harry-tray` 选择“退出 HARRY Translate”。
 
-后端停止后，Tauri 宿主会通过健康检查在约 3 秒内退出，不留下桌面浮窗。
+显式退出会先停止实时翻译和音频，再回收本地服务与 Tauri 宿主。关闭设置
+窗口只会隐藏窗口，不会停止仍在运行的实时翻译。
 不要使用 `killall python` 等宽泛命令。
 
 可安全重新生成的目录：

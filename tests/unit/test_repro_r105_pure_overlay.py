@@ -164,11 +164,11 @@ class R105PureOverlayReproTests(unittest.TestCase):
         tray = tray_path.read_text(encoding="utf-8")
         for required in (
             '"harry-tray"',
-            "打开配置页（浏览器）",
+            "打开设置窗口",
             "沉浸模式（透明穿透）",
             "锁定穿透（保留底色）",
             "重置悬浮窗位置与尺寸",
-            "退出悬浮窗",
+            "退出 HARRY Translate",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, tray)

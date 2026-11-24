@@ -609,6 +609,31 @@ impl PythonSidecarManager {
         }
         self.shutdown_owned_child();
     }
+
+    pub fn shutdown_for_application_exit(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        if self.owns_child.load(Ordering::SeqCst) {
+            self.shutdown_owned_child();
+            return;
+        }
+
+        let endpoint = self.endpoint.lock().take();
+        let Some(endpoint) = endpoint else {
+            return;
+        };
+        send_http_shutdown(endpoint.port);
+        let deadline = Instant::now() + GRACEFUL_EXIT_TIMEOUT;
+        while Instant::now() < deadline {
+            if !check_health_once(endpoint.port, Duration::from_millis(100)) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        tracing::warn!(
+            port = endpoint.port,
+            "attached backend did not stop before the explicit application-exit deadline"
+        );
+    }
 }
 
 impl Drop for PythonSidecarManager {
@@ -697,6 +722,44 @@ mod tests {
         manager.shutdown();
         assert!(manager.current_endpoint().is_none());
         server.join().expect("fake backend thread");
+    }
+
+    #[test]
+    fn explicit_application_exit_requests_shutdown_from_attached_backend() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("fake backend listener");
+        let port = listener.local_addr().expect("fake backend address").port();
+        let server = thread::spawn(move || {
+            let (mut health_stream, _) = listener.accept().expect("attach request");
+            let mut health_request = [0_u8; 512];
+            let _ = health_stream.read(&mut health_request);
+            let body = br#"{"service":"harry-translate-v2","fast":true,"pid":4242}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = health_stream.write_all(response.as_bytes());
+            let _ = health_stream.write_all(body);
+            drop(health_stream);
+
+            let (mut shutdown_stream, _) = listener.accept().expect("shutdown request");
+            let mut shutdown_request = [0_u8; 512];
+            let read = shutdown_stream.read(&mut shutdown_request).unwrap_or(0);
+            let request = String::from_utf8_lossy(&shutdown_request[..read]);
+            let _ = shutdown_stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+            request.contains("POST /api/system/shutdown")
+        });
+
+        let manager = PythonSidecarManager::new(std::env::temp_dir(), None);
+        manager
+            .attach(format!("http://127.0.0.1:{port}"))
+            .expect("healthy attached backend");
+        manager.shutdown_for_application_exit();
+        assert!(manager.current_endpoint().is_none());
+        assert!(
+            server.join().expect("fake shutdown backend thread"),
+            "explicit quit must POST /api/system/shutdown"
+        );
     }
 
     #[test]

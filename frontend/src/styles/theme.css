@@ -209,6 +209,42 @@ select:focus-visible {
   font-size: 10px;
 }
 
+.settings-native-exit {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-native-exit__button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: #f7e5df;
+  background: rgba(183, 69, 62, 0.16);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-native-exit__button:hover:not(:disabled) {
+  border-color: rgba(255, 190, 174, 0.48);
+  background: rgba(183, 69, 62, 0.28);
+}
+
+.settings-native-exit__button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.settings-native-exit__error {
+  color: #ffc0b5;
+  line-height: 1.35;
+}
+
 .settings-content {
   display: grid;
   min-width: 0;
@@ -250,11 +286,25 @@ select:focus-visible {
   padding: 4px 7px;
   border: 1px solid transparent;
   border-radius: 5px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
 }
 
 .settings-back--auxiliary:hover {
   border-color: var(--line);
   background: var(--surface);
+}
+
+.settings-auxiliary-action {
+  display: grid;
+  flex: none;
+  gap: 3px;
+}
+
+.settings-auxiliary-action .settings-action-feedback--error {
+  max-width: 220px;
+  text-align: left;
 }
 
 .settings-topbar h1 {
@@ -279,9 +329,34 @@ select:focus-visible {
   gap: 4px;
 }
 
-.settings-launch-buttons {
+.settings-realtime-switch {
   display: flex;
-  gap: 7px;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.settings-realtime-switch__copy {
+  display: grid;
+  min-width: 128px;
+  gap: 1px;
+}
+
+.settings-realtime-switch__copy strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.settings-realtime-switch__copy small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .settings-action-feedback {
@@ -292,6 +367,15 @@ select:focus-visible {
   line-height: 1.3;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.settings-action-feedback--error {
+  padding: 3px 7px;
+  border: 1px solid rgba(183, 69, 62, 0.28);
+  border-radius: 5px;
+  color: var(--danger);
+  background: #fff4ef;
+  font-size: 10px;
 }
 
 .settings-engine-pill,
@@ -645,33 +729,71 @@ select:focus-visible {
 
 .settings-toggle {
   position: relative;
-  width: 38px;
-  height: 22px;
+  width: 44px;
+  height: 26px;
+  flex: none;
   padding: 0;
-  border: 0;
+  border: 1px solid #b7c0ba;
   border-radius: 999px;
-  background: #c8cfca;
+  background: #dfe4e0;
   cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out;
 }
 
-.settings-toggle span {
+.settings-toggle__thumb {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: transform 150ms ease;
+  transition:
+    transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 120ms ease-out;
 }
 
 .settings-toggle.is-on {
+  border-color: var(--teal);
   background: var(--teal);
 }
 
-.settings-toggle.is-on span {
-  transform: translateX(16px);
+.settings-toggle.is-on .settings-toggle__thumb {
+  transform: translateX(18px);
+}
+
+.settings-toggle:active:not(:disabled) .settings-toggle__thumb {
+  transform: scaleX(1.08);
+}
+
+.settings-toggle.is-on:active:not(:disabled) .settings-toggle__thumb {
+  transform: translateX(18px) scaleX(1.08);
+}
+
+.settings-toggle:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.settings-toggle[aria-busy="true"] {
+  cursor: wait;
+}
+
+.settings-toggle[aria-busy="true"]::after {
+  position: absolute;
+  top: 7px;
+  left: 16px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  content: "";
 }
 
 .settings-segmented {
@@ -1712,6 +1834,23 @@ select:focus-visible {
     display: none;
   }
 
+  .settings-sidebar__footer--native {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 10px;
+    padding: 10px 2px 0;
+  }
+
+  .settings-sidebar__footer--native > span,
+  .settings-sidebar__footer--native > small {
+    display: none;
+  }
+
+  .settings-sidebar__footer--native .settings-native-exit {
+    min-width: 172px;
+  }
+
   .settings-content {
     display: block;
   }
@@ -1869,13 +2008,9 @@ select:focus-visible {
     justify-items: stretch;
   }
 
-  .settings-launch-buttons {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .settings-launch-buttons .settings-button {
+  .settings-realtime-switch {
     width: 100%;
+    justify-content: space-between;
   }
 
   .settings-action-feedback {

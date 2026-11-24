@@ -6,15 +6,15 @@ import {
   ExternalLink,
   Gauge,
   LoaderCircle,
+  LogOut,
   Mic2,
-  Pause,
-  Play,
   SlidersHorizontal,
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioLanguagePanel } from "../components/settings/AudioLanguagePanel";
+import { Toggle } from "../components/settings/Controls";
 import { GeneralDiagnosticsPanel } from "../components/settings/GeneralDiagnosticsPanel";
 import { GlossaryInsightsPanel } from "../components/settings/GlossaryInsightsPanel";
 import { PreviewStage } from "../components/settings/PreviewStage";
@@ -22,10 +22,15 @@ import { ProvidersPanel } from "../components/settings/ProvidersPanel";
 import { SubtitlePanel } from "../components/settings/SubtitlePanel";
 import { LanguageStatusCapsule } from "../components/status/LanguageStatusCapsule";
 import {
+  isTauriRuntime,
+  tauriInvoke,
+} from "../lib/backendBridge";
+import {
   getOverlayStatus,
   getLatestSession,
   getSessionExportUrl,
   hideOverlay,
+  isOverlayRealtimeActive,
   launchOverlay,
 } from "../shared/apiClient";
 import type {
@@ -61,6 +66,8 @@ const DEFAULT_BROWSER_FALLBACK_URL = "/hud?fallback=browser";
 const INITIAL_OVERLAY_STATUS: OverlayStatus = {
   running: false,
   visible: false,
+  realtime_enabled: false,
+  stop_error: null,
   registered: false,
   binary_available: false,
   fallback: null,
@@ -128,12 +135,18 @@ export function SettingsView() {
   const [overlayAction, setOverlayAction] = useState<"launch" | "hide" | null>(
     null,
   );
-  const [overlayMessage, setOverlayMessage] = useState("");
+  const [overlayError, setOverlayError] = useState("");
+  const [auxiliaryError, setAuxiliaryError] = useState("");
+  const [appQuitBusy, setAppQuitBusy] = useState(false);
+  const [appQuitError, setAppQuitError] = useState("");
   const [configSocketPhase, setConfigSocketPhase] =
     useState<SocketPhase>("idle");
   const [latestSessionId, setLatestSessionId] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState("");
   const initialized = useRef(false);
+  const mountedRef = useRef(true);
+  const overlayBusyRef = useRef(false);
+  const overlayStatusRequestId = useRef(0);
   const {
     status,
     saveState,
@@ -158,19 +171,48 @@ export function SettingsView() {
     void init();
   }, [init]);
 
+  const refreshOverlayStatus =
+    useCallback(async (): Promise<OverlayStatus | null> => {
+      const requestId = ++overlayStatusRequestId.current;
+      try {
+        const nextStatus = await getOverlayStatus();
+        if (
+          mountedRef.current &&
+          requestId === overlayStatusRequestId.current
+        ) {
+          setOverlayStatus((current) => ({ ...current, ...nextStatus }));
+        }
+        return nextStatus;
+      } catch {
+        return null;
+      }
+    }, []);
+
   useEffect(() => {
-    let active = true;
-    getOverlayStatus()
-      .then((nextStatus) => {
-        if (active) setOverlayStatus((current) => ({ ...current, ...nextStatus }));
-      })
-      .catch(() => {
-        // The explicit launch/hide actions surface actionable errors.
-      });
+    mountedRef.current = true;
+    void refreshOverlayStatus();
     return () => {
-      active = false;
+      mountedRef.current = false;
     };
-  }, []);
+  }, [refreshOverlayStatus]);
+
+  useEffect(() => {
+    const refreshWhenActive = () => {
+      if (overlayBusyRef.current) return;
+      if (
+        document.visibilityState === "visible" ||
+        document.hasFocus()
+      ) {
+        void refreshOverlayStatus();
+      }
+    };
+    window.addEventListener("focus", refreshWhenActive);
+    document.addEventListener("visibilitychange", refreshWhenActive);
+    return () => {
+      window.removeEventListener("focus", refreshWhenActive);
+      document.removeEventListener("visibilitychange", refreshWhenActive);
+    };
+  }, [refreshOverlayStatus]);
 
   useEffect(() => {
     let active = true;
@@ -192,6 +234,15 @@ export function SettingsView() {
       onEvent: (event) => {
         if (event.type === "config_updated" && event.settings) {
           syncExternalSettings(event.settings, configSyncOptions(event));
+        }
+        if (
+          event.type === "overlay_status" &&
+          event.overlay &&
+          !overlayBusyRef.current
+        ) {
+          overlayStatusRequestId.current += 1;
+          setOverlayStatus((current) => ({ ...current, ...event.overlay }));
+          setOverlayError("");
         }
       },
     });
@@ -221,90 +272,133 @@ export function SettingsView() {
   }
 
   const needsSetup = config?.needs_setup ?? true;
+  const nativeRuntime = isTauriRuntime();
   const apiKeyMask = config?.api_key_masked || config?.key_mask || "";
   const activeLabel = TABS.find((tab) => tab.id === activeTab)?.label || "";
   const mainEngine = config?.engine_states?.main;
   const overlayBusy = overlayAction !== null;
+  const isRealtimeOn = isOverlayRealtimeActive(overlayStatus);
+  const overlayStateText = overlayBusy
+    ? "正在切换…"
+    : isRealtimeOn
+      ? "实时翻译已开启"
+      : needsSetup
+        ? "配置密钥后可开启实时翻译"
+        : overlayStatus.visible
+          ? "实时翻译已关闭，悬浮窗仍可见"
+          : "已待机（悬浮窗已隐藏）";
 
-  const startRealtimeTranslation = async () => {
-    setOverlayAction("launch");
-    setOverlayMessage("");
+  const waitForAuthoritativeStatus = async (
+    expectedEnabled: boolean,
+    allowStarting: boolean,
+  ): Promise<OverlayStatus | null> => {
+    const attempts = allowStarting ? 13 : 1;
+    let latest: OverlayStatus | null = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      latest = await refreshOverlayStatus();
+      if (!latest) return null;
+      const confirmed = expectedEnabled
+        ? isOverlayRealtimeActive(latest)
+        : latest.visible !== true && latest.realtime_enabled === false;
+      if (confirmed || attempt === attempts - 1) return latest;
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 150);
+      });
+    }
+    return latest;
+  };
+
+  const toggleRealtimeTranslation = async (nextEnabled: boolean) => {
+    if (overlayBusyRef.current) return;
+    if (needsSetup) {
+      setOverlayError("配置密钥后才可开启实时翻译");
+      return;
+    }
+
+    overlayBusyRef.current = true;
+    setOverlayAction(nextEnabled ? "launch" : "hide");
+    setOverlayError("");
     try {
-      const result = await launchOverlay();
-      const nativeStarted =
-        result.action !== "browser_fallback" && result.fallback !== "browser";
-      const browserFallbackUrl = fallbackUrlForLaunch(result);
-      setOverlayStatus((current) => ({
-        ...current,
-        running: result.running ?? nativeStarted,
-        visible: result.visible ?? nativeStarted,
-        registered: result.registered ?? current.registered,
-        binary_available:
-          result.binary_available ?? current.binary_available,
-        fallback: result.fallback ?? current.fallback,
-        control_url: result.control_url ?? current.control_url,
-      }));
+      const result = nextEnabled ? await launchOverlay() : await hideOverlay();
+      const browserFallbackUrl = nextEnabled
+        ? fallbackUrlForLaunch(result)
+        : null;
       if (result.ok === false) {
-        setOverlayMessage(result.message || "实时翻译启动未完成");
-      } else if (browserFallbackUrl) {
+        const current = await refreshOverlayStatus();
+        const truthDetail =
+          current === null
+            ? ""
+            : isOverlayRealtimeActive(current)
+              ? "；服务端当前为开启状态"
+              : current.visible
+                ? "；悬浮窗仍可见"
+                : "；服务端仍为关闭状态";
+        const stopDetail = current?.stop_error
+          ? `；停止错误：${current.stop_error}`
+          : "";
+        setOverlayError(
+          `${nextEnabled ? "开启" : "关闭"}实时翻译失败：${
+            result.message || "实时翻译切换未完成"
+          }${truthDetail}${stopDetail}`,
+        );
+        return;
+      }
+
+      if (browserFallbackUrl) {
         const opened = openBrowserFallback(browserFallbackUrl);
-        setOverlayMessage(
+        await refreshOverlayStatus();
+        setOverlayError(
           opened === "new_tab"
-            ? "原生壳不可用，已打开浏览器辅助大屏"
+            ? "原生壳不可用，已打开浏览器辅助大屏；实时翻译开关未开启"
             : opened === "same_tab"
-              ? "原生壳不可用，已切换到浏览器辅助大屏"
+              ? "原生壳不可用，已切换到浏览器辅助大屏；实时翻译开关未开启"
               : "浏览器拦截了辅助窗口，请使用“浏览器大屏（辅助）”链接",
         );
-      } else {
-        setOverlayMessage("实时翻译已启动");
+        return;
+      }
+
+      const current = await waitForAuthoritativeStatus(
+        nextEnabled,
+        nextEnabled && result.action === "starting",
+      );
+      if (!current) {
+        throw new Error("无法读取实时翻译真实状态");
+      }
+      const confirmed = nextEnabled
+        ? isOverlayRealtimeActive(current)
+        : current.visible !== true && current.realtime_enabled === false;
+      if (!confirmed) {
+        setOverlayError(
+          nextEnabled
+            ? "实时翻译未能开启，开关仍保持后端真实状态"
+            : "实时翻译未能完全关闭，请检查悬浮窗与音频状态",
+        );
       }
     } catch (requestError) {
-      setOverlayMessage(
-        requestError instanceof Error ? requestError.message : "启动失败",
+      const current = await refreshOverlayStatus();
+      const truthDetail =
+        current === null
+          ? "；无法确认服务端状态"
+          : isOverlayRealtimeActive(current)
+            ? "；服务端当前为开启状态"
+            : current.visible
+              ? "；悬浮窗仍可见"
+              : "；已回退到关闭状态";
+      const message =
+        requestError instanceof Error
+          ? requestError.message
+          : "请求失败";
+      const stopDetail = current?.stop_error
+        ? `；停止错误：${current.stop_error}`
+        : "";
+      setOverlayError(
+        `${nextEnabled ? "开启" : "关闭"}实时翻译失败：${message}${truthDetail}${stopDetail}`,
       );
     } finally {
+      overlayBusyRef.current = false;
       setOverlayAction(null);
     }
   };
-
-  const pauseOverlay = async () => {
-    setOverlayAction("hide");
-    setOverlayMessage("");
-    try {
-      const result = await hideOverlay();
-      setOverlayStatus((current) => ({
-        ...current,
-        running: result.running ?? current.running,
-        visible: false,
-        registered: result.registered ?? current.registered,
-        binary_available:
-          result.binary_available ?? current.binary_available,
-        fallback: result.fallback ?? current.fallback,
-        control_url: result.control_url ?? current.control_url,
-      }));
-      setOverlayMessage(
-        result.ok === false
-          ? result.message || "隐藏暂停未完成"
-          : "悬浮窗已隐藏，字幕记录保留",
-      );
-    } catch (requestError) {
-      setOverlayMessage(
-        requestError instanceof Error ? requestError.message : "隐藏失败",
-      );
-    } finally {
-      setOverlayAction(null);
-    }
-  };
-
-  const overlayHint =
-    overlayMessage ||
-    (needsSetup
-      ? "配置密钥后可启动实时翻译"
-      : overlayStatus.running
-        ? overlayStatus.visible
-          ? "悬浮窗运行中"
-          : "悬浮窗已隐藏"
-        : "悬浮窗尚未启动");
   const syncTitle =
     saveState === "error"
       ? error || "实时同步失败"
@@ -346,6 +440,37 @@ export function SettingsView() {
     }
   };
 
+  const openAuxiliaryMonitor = async () => {
+    setAuxiliaryError("");
+    try {
+      await tauriInvoke("open_auxiliary_monitor_in_browser");
+    } catch (requestError) {
+      setAuxiliaryError(
+        requestError instanceof Error
+          ? requestError.message
+          : "无法打开浏览器辅助大屏",
+      );
+    }
+  };
+
+  const quitApplication = async () => {
+    if (appQuitBusy) return;
+    const confirmed = window.confirm(
+      "退出 HARRY Translate？实时翻译将立即停止，本地服务也会关闭。",
+    );
+    if (!confirmed) return;
+    setAppQuitBusy(true);
+    setAppQuitError("");
+    try {
+      await tauriInvoke("app_quit");
+    } catch (requestError) {
+      setAppQuitBusy(false);
+      setAppQuitError(
+        requestError instanceof Error ? requestError.message : "退出请求失败",
+      );
+    }
+  };
+
   return (
     <main className="settings-shell">
       <aside className="settings-sidebar">
@@ -378,11 +503,38 @@ export function SettingsView() {
           })}
         </nav>
 
-        <div className="settings-sidebar__footer">
+        <div
+          className={`settings-sidebar__footer${
+            nativeRuntime ? " settings-sidebar__footer--native" : ""
+          }`}
+        >
           <span className={needsSetup ? "is-warning" : "is-ready"}>
             <i />
             {needsSetup ? "等待配置" : "密钥已就绪"}
           </span>
+          {nativeRuntime ? (
+            <div className="settings-native-exit">
+              <button
+                type="button"
+                className="settings-native-exit__button"
+                disabled={appQuitBusy}
+                aria-busy={appQuitBusy || undefined}
+                aria-describedby="settings-native-exit-help"
+                onClick={() => void quitApplication()}
+              >
+                <LogOut size={14} />
+                {appQuitBusy ? "正在退出…" : "退出应用"}
+              </button>
+              <small id="settings-native-exit-help">
+                停止实时翻译并关闭本地服务
+              </small>
+              {appQuitError ? (
+                <small role="alert" className="settings-native-exit__error">
+                  {appQuitError}
+                </small>
+              ) : null}
+            </div>
+          ) : null}
           <small>Apple Silicon · macOS</small>
         </div>
       </aside>
@@ -390,10 +542,28 @@ export function SettingsView() {
       <section className="settings-content">
         <header className="settings-topbar">
           <div className="settings-topbar__title">
-            <a href="/" className="settings-back settings-back--auxiliary">
-              <ExternalLink size={15} />
-              浏览器大屏（辅助）
-            </a>
+            <div className="settings-auxiliary-action">
+              {nativeRuntime ? (
+                <button
+                  type="button"
+                  className="settings-back settings-back--auxiliary"
+                  onClick={() => void openAuxiliaryMonitor()}
+                >
+                  <ExternalLink size={15} />
+                  浏览器大屏（辅助）
+                </button>
+              ) : (
+                <a href="/" className="settings-back settings-back--auxiliary">
+                  <ExternalLink size={15} />
+                  浏览器大屏（辅助）
+                </a>
+              )}
+              {auxiliaryError ? (
+                <small role="alert" className="settings-action-feedback--error">
+                  {auxiliaryError}
+                </small>
+              ) : null}
+            </div>
             <h1>{activeLabel}</h1>
           </div>
           <div className="settings-topbar__status">
@@ -410,38 +580,43 @@ export function SettingsView() {
             </span>
             <span className="settings-port">:{health?.port || "—"}</span>
           </div>
-          <div className="settings-launch-actions">
-            <div className="settings-launch-buttons">
-              <button
-                type="button"
-                className="settings-button settings-button--primary"
+          <div className="settings-launch-actions settings-realtime-actions">
+            <div className="settings-realtime-switch">
+              <span className="settings-realtime-switch__copy">
+                <strong>实时翻译</strong>
+                <small
+                  id="realtime-switch-state"
+                  aria-live="polite"
+                >
+                  {overlayStateText}
+                </small>
+              </span>
+              <Toggle
+                id="realtime-translation-switch"
+                checked={isRealtimeOn}
                 disabled={needsSetup || overlayBusy}
-                onClick={() => void startRealtimeTranslation()}
-              >
-                {overlayAction === "launch" ? (
-                  <LoaderCircle size={17} className="spin" />
-                ) : (
-                  <Play size={17} />
-                )}
-                启动实时翻译
-              </button>
-              <button
-                type="button"
-                className="settings-button settings-button--quiet"
-                disabled={overlayBusy || !overlayStatus.running}
-                onClick={() => void pauseOverlay()}
-              >
-                {overlayAction === "hide" ? (
-                  <LoaderCircle size={17} className="spin" />
-                ) : (
-                  <Pause size={17} />
-                )}
-                隐藏暂停
-              </button>
+                busy={overlayBusy}
+                label="实时翻译"
+                ariaDescribedBy={
+                  overlayError
+                    ? "realtime-switch-state realtime-switch-error"
+                    : "realtime-switch-state"
+                }
+                className="settings-realtime-switch__toggle"
+                onChange={(nextEnabled) => {
+                  void toggleRealtimeTranslation(nextEnabled);
+                }}
+              />
             </div>
-            <small className="settings-action-feedback" aria-live="polite">
-              {overlayHint}
-            </small>
+            {overlayError ? (
+              <small
+                id="realtime-switch-error"
+                role="alert"
+                className="settings-action-feedback settings-action-feedback--error"
+              >
+                {overlayError}
+              </small>
+            ) : null}
           </div>
         </header>
 

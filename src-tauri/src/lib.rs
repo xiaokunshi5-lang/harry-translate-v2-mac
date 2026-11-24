@@ -9,17 +9,19 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Manager, RunEvent, WindowEvent};
-use windows::controls::{
-    self, persist_snapshot_best_effort, show_primary_overlay_window, OverlayControlServer,
-    SharedAppState,
-};
+use tauri::menu::{Menu, MenuBuilder, MenuEvent, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent, Wry};
+use windows::controls::{self, persist_snapshot_best_effort, OverlayControlServer, SharedAppState};
 use windows::macos_pointer::PointerPassThroughState;
 use windows::macos_space::{install_space_observer, SpaceFollowCoordinator};
 use windows::native::{configure_macos_overlay_window, NativePanelKind};
 use windows::overlay::{OverlayState, PRIMARY_OVERLAY_LABEL};
+use windows::settings::show_and_focus_settings_window;
 use windows::summary::SummaryWindowState;
 use windows::tray::install_tray;
+
+const MENU_OPEN_SETTINGS_ID: &str = "harry-menu-open-settings";
+const MENU_QUIT_ID: &str = "harry-menu-quit";
 
 fn resolve_project_root() -> PathBuf {
     if let Ok(explicit) = std::env::var("HARRY_PROJECT_ROOT") {
@@ -52,6 +54,68 @@ fn should_open_settings() -> bool {
     !std::env::args().any(|arg| arg == "--no-open-settings")
 }
 
+fn build_app_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
+    let open_settings = MenuItem::with_id(
+        app,
+        MENU_OPEN_SETTINGS_ID,
+        "打开设置窗口",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        MENU_QUIT_ID,
+        "退出 HARRY Translate",
+        true,
+        Some("CmdOrCtrl+Q"),
+    )?;
+    let about = PredefinedMenuItem::about(app, None, None)?;
+
+    let app_menu = SubmenuBuilder::new(app, app.package_info().name.clone())
+        .item(&about)
+        .separator()
+        .item(&open_settings)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&quit)
+        .build()?;
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .minimize()
+        .maximize()
+        .separator()
+        .close_window()
+        .build()?;
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &edit_menu, &window_menu])
+        .build()
+}
+
+fn handle_app_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
+    match event.id().0.as_str() {
+        MENU_OPEN_SETTINGS_ID => {
+            if let Err(error) = show_and_focus_settings_window(app) {
+                tracing::warn!("app menu could not show settings window: {error}");
+            }
+        }
+        MENU_QUIT_ID => controls::request_application_exit(app.clone()),
+        _ => {}
+    }
+}
+
 pub fn run() {
     let project_root = resolve_project_root();
     let sidecar = Arc::new(PythonSidecarManager::new(project_root.clone(), None));
@@ -69,6 +133,7 @@ pub fn run() {
         pointer: Arc::clone(&pointer),
         summary: Arc::clone(&summary),
         geometry_revision: Arc::clone(&geometry_revision),
+        quitting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     let sidecar_for_setup = Arc::clone(&sidecar);
@@ -76,15 +141,21 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Err(error) = show_primary_overlay_window(app) {
-                tracing::warn!("secondary launch could not show existing overlay: {error}");
+            if should_open_settings() {
+                if let Err(error) = show_and_focus_settings_window(app) {
+                    tracing::warn!("secondary launch could not show settings window: {error}");
+                }
             }
         }))
         .plugin(tauri_nspanel::init())
         .plugin(tauri_plugin_opener::init())
+        .menu(build_app_menu)
+        .on_menu_event(handle_app_menu_event)
         .manage(shared_state)
         .invoke_handler(tauri::generate_handler![
+            windows::controls::app_quit,
             windows::controls::get_backend_endpoint,
+            windows::controls::open_auxiliary_monitor_in_browser,
             windows::controls::overlay_get_state,
             windows::controls::overlay_get_visibility,
             windows::controls::overlay_native_diagnostics,
@@ -140,9 +211,6 @@ pub fn run() {
                 );
                 windows::controls::apply_presentation_frame(app.handle(), &snapshot);
                 controls::apply_native_presentation(app.handle(), &state, &snapshot, false);
-                show_primary_overlay_window(app.handle())
-                    .map_err(|error| std::io::Error::other(error))?;
-                app.state::<OverlayControlServer>().set_visible(true);
 
                 let overlay_for_events = Arc::clone(&state.overlay);
                 let project_root_for_events = state.project_root.clone();
@@ -185,12 +253,26 @@ pub fn run() {
             };
 
             if let (Some(endpoint), Some(control_url)) = (endpoint.as_ref(), control_url.as_ref()) {
-                controls::register_overlay_control(endpoint, control_url.clone());
+                let visible = app.state::<OverlayControlServer>().is_visible();
+                if let Err(error) = controls::register_overlay_control_blocking(
+                    endpoint,
+                    control_url.clone(),
+                    visible,
+                ) {
+                    tracing::warn!(
+                        "initial overlay control registration failed; retrying in background: {error}"
+                    );
+                    controls::register_overlay_control(
+                        endpoint,
+                        control_url.clone(),
+                        visible,
+                    );
+                }
             }
 
             if endpoint.is_some() && should_open_settings() {
-                if let Err(error) = controls::open_settings_in_browser(app.handle()) {
-                    tracing::warn!("could not open settings page: {error}");
+                if let Err(error) = show_and_focus_settings_window(app.handle()) {
+                    tracing::warn!("could not open native settings window: {error}");
                 }
             }
             Ok(())
@@ -198,11 +280,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building HARRY Translate Mac Tauri application");
 
-    app.run(move |_app_handle, event| {
-        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+    app.run(move |app_handle, event| match event {
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            if let Err(error) = show_and_focus_settings_window(app_handle) {
+                tracing::warn!("Dock reopen could not show settings window: {error}");
+            }
+        }
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            api.prevent_exit();
+            controls::request_application_exit(app_handle.clone());
+        }
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             space_coordinator_for_events.cancel();
             sidecar_for_events.shutdown();
         }
+        _ => {}
     });
 }
 

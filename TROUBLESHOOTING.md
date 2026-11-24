@@ -228,7 +228,44 @@ ls -l config/glossary.json.lock 2>/dev/null
 后续修复应另立任务，并验证三种格式、零 Token/`usage`/费用和临时文件
 零残留。
 
-## 13. 长会话变慢
+## 13. DMG 提示“已损坏”或签名状态不明
+
+当前 R18 发布标签为 `v2.0-r18-ready`，DMG 大小为 `22,222,266` 字节，
+SHA-256 为
+`d3f919480afedac359eee8cb26f7848b5bc751cc571da0dd626d71ce96b1efbf`。
+如果你下载到的文件大小或哈希不同，先不要继续安装。
+
+先确认不是下载损坏：
+
+```bash
+shasum -a 256 "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+hdiutil verify "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+```
+
+哈希必须与 Release 的 `.sha256` 一致，`hdiutil verify` 必须成功。若两项
+均正常，但 Apple Silicon 上仍提示“已损坏”，通常是浏览器 quarantine
+作用于未公证的 ad-hoc 包，而不是文件真的损坏。
+
+把应用拖入 Applications 后，只对 HARRY 应用执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/HARRY Translate.app"
+```
+
+然后再次启动。不要关闭系统全局 Gatekeeper，也不要修改其他应用的隔离
+属性；如果哈希或映像校验失败，应删除并重新下载。
+
+检查本地 package 产物的真实签名状态：
+
+```bash
+.venv-v2/bin/python scripts/verify_package_smoke.py --check
+```
+
+输出中的 `signature_mode=adhoc_local` 与 `notarized=false` 必须如实保留。
+只有 Developer ID 证书可用且 Apple 公证返回 `Accepted`、app 和 DMG 票据
+分别验证通过后，才可报告正式公证轨道成功。
+
+## 14. 长会话变慢
 
 先运行专项压测：
 
@@ -247,7 +284,7 @@ ls -l config/glossary.json.lock 2>/dev/null
 
 不要缩小测试规模或放宽阈值来绕过问题。
 
-## 14. 怀疑密钥已泄露
+## 15. 怀疑密钥已泄露
 
 立即：
 
@@ -265,7 +302,7 @@ gitleaks git --redact --no-banner --log-opts=--all .
 
 轮换 Key 是第一步；只删除明文不能使旧 Key 重新安全。
 
-## 15. 何时升级处理
+## 16. 何时升级处理
 
 出现以下情况时停止继续堆补丁：
 

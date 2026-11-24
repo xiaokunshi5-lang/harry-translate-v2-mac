@@ -7,6 +7,10 @@
 > **自动验证日期**：2026-11-24
 > **状态**：正式源码已完成本地自动门禁、公开仓库独立历史整理和私人备份
 
+> **后续版本**：R18 已完成人工验收并发布为 `v2.0-r18-ready`。本报告的
+> `v2.0-mac-ready` 数据保留为 R17 历史记录，不应继续作为当前下载版本。
+> 当前状态见 [RELEASE_REPORT_R18.md](./RELEASE_REPORT_R18.md)。
+
 本报告是 Phase 6 和 R01-R17 的出厂追溯入口。常规开发仍应先读
 `.agents/PROJECT_CONTRACT.md`、现行 ADR 和当前正式文档；本报告用于发布
 审计、交付追溯和已知限制确认。阶段 handoff 与过程材料由用户保存在仓库
@@ -211,6 +215,26 @@ DMG 是 GitHub Release 资产，不进入源码 Git 历史。状态为非草稿�
 Release 同时提供 `.sha256` sidecar。发布使用前仍应重新运行 R17 压测、
 看门狗、前端/Rust 构建和 Sidecar 生命周期检查。
 
+### 签名与公证双轨
+
+`scripts/package-app.sh` 支持两条互相隔离的构建轨道：
+
+1. 未提供 `APPLE_SIGNING_IDENTITY` 时继续构建完整 arm64 `.app`/`.dmg`，
+   验证报告必须为 `signature_mode=adhoc_local`、`notarized=false`。
+2. 提供 Developer ID Application 身份与
+   `APPLE_NOTARY_KEYCHAIN_PROFILE` 或 App Store Connect API Key 时，先签
+   PyInstaller sidecar，再由 Tauri 签 app，提交 DMG，只有 Apple 返回
+   `Accepted` 后才 staple app、DMG 并执行 `spctl`。
+
+证书和公证凭据只从构建机环境读取，不属于仓库、`.env.example` 或本地
+Mock 验证的前置条件。当前正式资产仍是既有 ad-hoc 包；本次未使用真实商业
+证书，因此 `developer_id_notarized` 与干净 Mac 双击无提示体验必须继续标为
+“尚未验证”。
+
+用户遇到“已损坏”时，必须先校验 SHA-256 与 `hdiutil verify`，再仅对
+`/Applications/HARRY Translate.app` 清除 quarantine。禁止关闭系统全局
+Gatekeeper。
+
 ## 9. 回滚
 
 公开仓库：
@@ -229,5 +253,6 @@ Release 同时提供 `.sha256` sidecar。发布使用前仍应重新运行 R17 �
 ## 10. 最终边界
 
 R17 证明的是当前 Apple Silicon Mac 工作树、Mock/本地服务和真实原生窗口
-夹具上的工程合同。它不替代真实会议、真实外网、真实音频设备和 Apple
-Developer 签名/公证。发布时必须保留本报告“尚未验证 / 待开放”栏。
+夹具上的工程合同。它不替代真实会议、真实外网、真实音频设备或商业化
+Apple Developer 签名/公证环境。发布时必须保留本报告“尚未验证 / 待开放”
+栏；没有真实证书运行证据时，不得把双轨脚本的存在写成已完成公证。

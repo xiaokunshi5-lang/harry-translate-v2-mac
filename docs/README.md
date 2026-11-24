@@ -11,6 +11,8 @@
 - [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md)：故障排查。
 - [RELEASE_REPORT_v2.0.md](./RELEASE_REPORT_v2.0.md)：正式发布证据、
   AC 追溯和已知边界。
+- [RELEASE_REPORT_R18.md](./RELEASE_REPORT_R18.md)：R18 人工验收结论、
+  自动门禁、公开发布资产和剩余边界。
 - [MAC_EXECUTION_PLAN.md](./MAC_EXECUTION_PLAN.md)：Mac-only 实施边界。
 - [../SECURITY.md](../SECURITY.md)：安全与敏感信息处理。
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)：开发、测试和提交要求。

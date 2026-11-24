@@ -2,7 +2,7 @@
 
 ## Supported Release
 
-Security fixes target the latest `v2.0-mac-ready` source tree and the public
+Security fixes target the latest `v2.0-r18-ready` source tree and the public
 release mirror.
 
 ## Reporting

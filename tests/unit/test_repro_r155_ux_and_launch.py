@@ -242,19 +242,39 @@ class ReproR155FrontendContractTests(unittest.TestCase):
         self.assertIn("source.trim()", pipeline)
         self.assertIn("target.trim()", pipeline)
 
-    def test_settings_use_one_primary_launch_and_passive_config_sync(self) -> None:
+    def test_settings_use_one_authoritative_switch_and_passive_config_sync(
+        self,
+    ) -> None:
         settings = (
             FRONTEND / "src" / "screens" / "SettingsView.tsx"
+        ).read_text(encoding="utf-8")
+        controls = (
+            FRONTEND / "src" / "components" / "settings" / "Controls.tsx"
         ).read_text(encoding="utf-8")
         api_client = (
             FRONTEND / "src" / "shared" / "apiClient.ts"
         ).read_text(encoding="utf-8")
-        self.assertIn("启动实时翻译", settings)
+        self.assertIn("<Toggle", settings)
+        self.assertIn('label="实时翻译"', settings)
+        self.assertIn("checked={isRealtimeOn}", settings)
+        self.assertIn("isOverlayRealtimeActive", settings)
+        self.assertIn('event.type === "overlay_status"', settings)
+        self.assertNotIn("启动实时翻译", settings)
+        self.assertNotIn("隐藏暂停", settings)
+        self.assertIn('role="switch"', controls)
+        self.assertIn("aria-checked={checked}", controls)
+        self.assertIn("disabled={blocked}", controls)
+        self.assertIn("aria-busy={busy || undefined}", controls)
         self.assertIn("launchOverlay", settings)
         self.assertIn("hideOverlay", settings)
         self.assertIn("/ws/config", settings)
         self.assertNotIn('new ChannelSocket("main"', settings)
-        for export in ["getOverlayStatus", "launchOverlay", "hideOverlay"]:
+        for export in [
+            "getOverlayStatus",
+            "isOverlayRealtimeActive",
+            "launchOverlay",
+            "hideOverlay",
+        ]:
             with self.subTest(export=export):
                 self.assertIn(export, api_client)
 

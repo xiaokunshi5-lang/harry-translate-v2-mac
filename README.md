@@ -1,21 +1,25 @@
 # HARRY Translate V2 Mac
 
-HARRY Translate V2 Mac 是面向 Apple Silicon Mac 的本地实时同传桌面应用。
-它使用 Python FastAPI 管理音频、同传会话、配置和旁路任务，使用 Tauri v2
-承载唯一 macOS 原生字幕浮窗，并使用 React 提供字幕界面和五栏配置中心。
+HARRY Translate 是在 Apple Silicon Mac 上运行的实时同传应用。它把会议或
+视频中的语音转成双语字幕，并提供热词、静默纠错和可选的重点总结。
 
-当前正式版为 **v2.0-mac-ready**，支持 macOS 13 及以上、Apple Silicon
-（arm64）设备。项目采用“单窗口、单主会话、单活跃上游 WebSocket”的稳定
-优先架构，核心工程行为可以在没有云端密钥的情况下通过 Mock 和本地测试
-验证。
+当前正式版为 **v2.0-r18-ready**，应用内部版本为 **0.2.0**，支持
+macOS 13 及以上。R18-01 至 R18-04 已于 2026-11-24 通过人工验收：
+启动时不会自动采音或推流，实时翻译开关会显示真实状态，设置窗口可以随时
+唤回，退出应用会一并停止后台服务。打包脚本支持 Developer ID 签名和
+公证流程，但本次发布的 DMG 仍是 ad-hoc 包，没有经过 Apple 公证。
 
 ## 下载正式版
 
-- [GitHub Release](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-mac-ready)
-- [arm64 DMG 直接下载](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-mac-ready/HARRY.Translate_0.2.0_aarch64.dmg)
-- 文件大小：`22,208,525` 字节
+- [GitHub Release](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/tag/v2.0-r18-ready)
+- [arm64 DMG 直接下载](https://github.com/xiaokunshi5-lang/harry-translate-v2-mac/releases/download/v2.0-r18-ready/HARRY.Translate_0.2.0_aarch64.dmg)
+- 文件大小：`22,222,266` 字节
 - SHA-256：
-  `eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd`
+  `d3f919480afedac359eee8cb26f7848b5bc751cc571da0dd626d71ce96b1efbf`
+
+双击 DMG，将 `HARRY Translate.app` 拖入「应用程序」，再从「应用程序」
+启动。日常操作见 [USER_GUIDE.md](./USER_GUIDE.md)，完整安装和校验步骤见
+[INSTALL.md](./INSTALL.md)。
 
 下载后可在终端校验：
 
@@ -24,21 +28,52 @@ shasum -a 256 \
   "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
 ```
 
-该构建是 ad-hoc 签名，未经过 Apple notarization。首次打开若被 Gatekeeper
-拦截，可在 Finder 中按住 Control 点击应用并选择“打开”，或按系统提示进入
-“系统设置 > 隐私与安全性”选择“仍要打开”。不要关闭全局 Gatekeeper。
+并可用 macOS 原生工具检查磁盘映像结构：
+
+```bash
+hdiutil verify \
+  "$HOME/Downloads/HARRY.Translate_0.2.0_aarch64.dmg"
+```
+
+### 为什么可能提示“已损坏”
+
+当前公开发布包尚未使用付费 Apple Developer ID 证书签名，也未经过 Apple
+公证。浏览器下载会给 DMG 加上 `com.apple.quarantine`，拖入 Applications
+后该属性会继续传递给应用。Apple Silicon 上的 Gatekeeper 对“带隔离属性、
+但仅 ad-hoc 签名且没有公证票据”的包，可能显示“已损坏，无法打开”。这不
+等于文件真的损坏。
+
+先确认上面两条校验命令均通过，然后把 `HARRY Translate.app` 拖入
+「应用程序」，只对这一个应用执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/HARRY Translate.app"
+```
+
+之后可从 Applications 正常启动。也可以先尝试在 Finder 中按住 Control
+点击应用并选择“打开”，或进入“系统设置 > 隐私与安全性”选择“仍要打开”。
+如果两条哈希/结构校验失败，不要放行，重新下载。
+
+**禁止关闭系统全局 Gatekeeper。** 上述命令只移除单个 HARRY 应用的隔离
+属性，不修改系统安全开关。
+
+该构建是 ad-hoc 签名，未经过 Apple notarization，因此必须保留上述
+quarantine 说明，不得把它描述成已完成 Developer ID 公证的版本。
 
 ## 当前状态
 
 - 源码、锁文件、构建脚本、测试和本地部署文档均已纳入仓库。
-- 正式版标签为 `v2.0-mac-ready`，GitHub Release 提供 arm64 `.dmg`。
+- 正式版标签为 `v2.0-r18-ready`，GitHub Release 提供 arm64 `.dmg`。
+- R18-01 至 R18-04 已于 2026-11-24 完成用户人工验收。
+- 桌面入口使用可关闭、可最小化并可再次唤回的原生设置窗口；冷启动不再
+  自动打开系统浏览器。
 - 字幕浮窗可在 QuickTime、Safari 视频、Keynote、PowerPoint 等 macOS
   原生全屏 Space 上显示。
 - 总结功能默认关闭；总结窗口是可关闭的普通 Tauri 窗口，不承诺显示在
   其他应用的全屏 Space 上。
 - MD/SRT/JSON 的后台记录器、原子保存和格式化基础已保留，但**用户侧
   下载/打开仍未开放**，不计入当前已交付功能。
-- 本地 `.dmg` 使用 ad-hoc 构建，尚未完成 Apple Developer 签名和
+- 公开发布 `.dmg` 使用 ad-hoc 构建，尚未完成 Apple Developer 签名和
   notarization。
 
 ## 功能范围
@@ -57,7 +92,9 @@ shasum -a 256 \
 - 原文、译文和双语三种显示模式，原/译字号与主次视觉可独立配置。
 - 唯一原生字幕浮窗内部零按钮、零链接，保持纯黑背景和可拖动缩放。
 - 全屏字幕浮窗使用真实非激活 `NSPanel`，不抢键盘焦点。
-- 沉浸或锁定穿透后，通过 `harry-tray` 菜单栏或浏览器配置页恢复。
+- 原生设置窗口是普通可聚焦 `NSWindow`，关闭后隐藏；Dock、Finder、托盘
+  和 `Command + ,` 可重新唤回。
+- 沉浸或锁定穿透后，通过 `harry-tray` 菜单栏或原生设置窗口恢复。
 - 动态分区滚动、换行高度补偿和 1000 张历史卡片硬上限。
 
 ### 词库、纠错与总结
@@ -79,6 +116,7 @@ flowchart LR
     Sidecar --> Qwen["单一 Qwen WebSocket"]
     Sidecar --> Config["配置、热词与旁路 worker"]
     Sidecar --> Host["单一 Tauri v2 宿主"]
+    Host --> Settings["原生设置窗口<br/>常规 NSWindow"]
     Host --> Overlay["HarrySubtitlePanel<br/>唯一字幕浮窗"]
     Host --> Summary["可选总结窗口"]
     Web["React 配置中心 / Web 控台"] --> Sidecar
@@ -188,11 +226,14 @@ HARRY_BOOTSTRAP_PREPARE_ONLY=1 ./启动同传系统.command
 ./启动桌面悬浮窗.command
 ```
 
-默认会打开独立浏览器配置页。如不希望自动打开：
+默认会显示原生设置窗口。如不希望自动显示：
 
 ```bash
 ./启动桌面悬浮窗.command --no-open-settings
 ```
+
+设置页中的“浏览器大屏（辅助）”会通过系统默认浏览器打开辅助页面，不会
+让原生设置窗口跳离 `/settings`。
 
 仅启动 Web 控台与浏览器模式：
 
@@ -287,7 +328,7 @@ src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/HARRY Translate_0.2.0_a
 当前已验证产物 SHA-256：
 
 ```text
-eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
+d3f919480afedac359eee8cb26f7848b5bc751cc571da0dd626d71ce96b1efbf
 ```
 
 构建产物不入 Git；重新构建后应重新记录哈希。
@@ -330,6 +371,8 @@ eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
   已知限制排查。
 - [docs/RELEASE_REPORT_v2.0.md](./docs/RELEASE_REPORT_v2.0.md)：正式发布
   证据、AC 追溯和边界。
+- [docs/RELEASE_REPORT_R18.md](./docs/RELEASE_REPORT_R18.md)：R18 人工验收、
+  自动门禁和最新发布资产。
 - [docs/MAC_EXECUTION_PLAN.md](./docs/MAC_EXECUTION_PLAN.md)：Mac-only
   实施边界和轮次总览。
 - [docs/workflows/README.md](./docs/workflows/README.md)：开发与修复工作流。
@@ -339,11 +382,14 @@ eccb5383c4463f771983ba85a4470a6a176ccc4be19e200da2d12a4e14f5b9fd
 ## 已知限制
 
 - MD/SRT/JSON 用户侧下载/打开尚未开放。
+- R18 的原生窗口恢复、实时翻译滑钮与可控退出已在目标 Mac 人工验收，
+  后续改动仍必须回归这些路径。
 - 真实 DashScope 长时断连和真实模型纠错/总结质量需要本机联网复验。
 - 真实物理麦克风 AGC 听感、BlackHole 和双音源环境需要本机复验。
 - Mission Control、登录界面、屏保和独占游戏不在字幕浮窗全屏承诺内。
 - 总结窗口不承诺加入其他应用的全屏 Space。
-- `.dmg` 尚未使用 Apple Developer 证书签名或 notarize。
+- 当前 `.dmg` 仍是 ad-hoc 签名，尚未使用 Apple Developer ID 证书和
+  notarization；干净 Mac 双击零提示启动仍待证书环境验证。
 
 ## 许可证
 

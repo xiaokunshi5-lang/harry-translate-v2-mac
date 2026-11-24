@@ -17,7 +17,7 @@ PLACEHOLDER = "sk-your-dashscope-api-key-here"
 
 
 class SettingsUiGateTests(unittest.TestCase):
-    def test_settings_and_dashboard_at_desktop_and_tablet_widths(self) -> None:
+    def test_settings_and_dashboard_at_desktop_tablet_and_native_minimum(self) -> None:
         node_modules = ROOT / "frontend" / "node_modules" / "playwright-core"
         self.assertTrue(node_modules.is_dir(), "run npm ci in frontend before pytest")
         output_dir = ROOT / ".tmp" / "r07-artifacts"
@@ -71,7 +71,7 @@ class SettingsUiGateTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
                 payload = json.loads(result.stdout)
-                self.assertEqual(len(payload["results"]), 2)
+                self.assertEqual(len(payload["results"]), 3)
                 self.assertTrue(
                     (output_dir / "desktop-settings.png").is_file(),
                     "missing desktop screenshot",
@@ -79,6 +79,10 @@ class SettingsUiGateTests(unittest.TestCase):
                 self.assertTrue(
                     (output_dir / "tablet-settings.png").is_file(),
                     "missing tablet screenshot",
+                )
+                self.assertTrue(
+                    (output_dir / "native-settings-min-settings.png").is_file(),
+                    "missing native minimum settings screenshot",
                 )
             finally:
                 process.terminate()

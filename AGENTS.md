@@ -19,6 +19,21 @@ long-session, WebSocket, glossary, compliance and package gates; the cleaner
 paragraph-state repair is recorded in `ADR-018`. Do not describe user-facing
 export as delivered or move historical tags.
 
+R18-01 through R18-04 were manually accepted by the user on 2026-11-24.
+The code closeout is `post-fix-R18` at candidate `47c3480`; the accepted
+checkpoints are `checkpoint-r18-01-ok`, `checkpoint-r18-02-ok`,
+`checkpoint-r18-03-ok`, and `checkpoint-r18-04-ok`. The public R18 release
+uses `v2.0-r18-ready`; do not move `v2.0-mac-ready`. Read `ADR-019` through
+`ADR-022` before touching startup gating, the realtime switch, native settings
+or window lifecycle, controlled exit, or package signing.
+
+The current R18 DMG is ad-hoc signed and not notarized. A quarantined download
+may still show the macOS "damaged" warning. Keep the hash and `hdiutil verify`
+checks, limit quarantine removal to the single HARRY application, and never
+recommend disabling system-wide Gatekeeper. Developer ID signing,
+notarization, and clean-Mac no-prompt launch remain unverified until a
+credential-backed build is executed and manually accepted.
+
 For R16-era behavior, read
 `.agents/decisions/ADR-017-r16-rev06-and-phase6-scope.md`. Historical L1
 baselines and stage handoffs may exist only in the user's local process

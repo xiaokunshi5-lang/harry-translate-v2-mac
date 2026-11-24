@@ -84,6 +84,12 @@ export function getOverlayStatus(): Promise<OverlayStatus> {
   return request<OverlayStatus>("/api/overlay/status");
 }
 
+export function isOverlayRealtimeActive(
+  status: Pick<OverlayStatus, "visible" | "realtime_enabled">,
+): boolean {
+  return status.visible === true && status.realtime_enabled !== false;
+}
+
 export function launchOverlay(): Promise<OverlayControlResponse> {
   return request<OverlayControlResponse>("/api/overlay/launch", {
     method: "POST",

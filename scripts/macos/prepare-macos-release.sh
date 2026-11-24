@@ -19,6 +19,25 @@ if [[ "$(uname -m)" != "arm64" ]]; then
   exit 1
 fi
 
+SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
+NOTARY_PROFILE="${APPLE_NOTARY_KEYCHAIN_PROFILE:-}"
+NOTARY_API_PRESENT=0
+if [[ -n "${APPLE_API_KEY_PATH:-}" || -n "${APPLE_API_KEY:-}" || -n "${APPLE_API_ISSUER:-}" || -n "${APPLE_API_KEY_ID:-}" ]]; then
+  NOTARY_API_PRESENT=1
+fi
+if [[ -n "$SIGNING_IDENTITY" ]]; then
+  if [[ -n "$NOTARY_PROFILE" || "$NOTARY_API_PRESENT" == "1" ]]; then
+    echo "RELEASE-SIGNING mode=developer_id_configured notarization=requested"
+  else
+    echo "RELEASE-SIGNING mode=developer_id_configured notarization=disabled"
+  fi
+else
+  echo "RELEASE-SIGNING mode=adhoc_local notarization=disabled"
+  if [[ -n "$NOTARY_PROFILE" || "$NOTARY_API_PRESENT" == "1" ]]; then
+    echo "WARN: notarization variables are present without APPLE_SIGNING_IDENTITY; they will be ignored." >&2
+  fi
+fi
+
 for required in \
   src-tauri/Info.plist \
   src-tauri/Entitlements.plist \
@@ -53,10 +72,11 @@ fi
 plutil -lint src-tauri/Info.plist src-tauri/Entitlements.plist
 
 if [[ "$CHECK_ONLY" == "1" ]]; then
+  ./scripts/package-app.sh --check
   echo "MACOS-RELEASE-CHECK PASS"
   exit 0
 fi
 
-echo ">> Preparing release artifacts. This does not publish or sign with a private identity."
+echo ">> Preparing release artifacts with optional Developer ID signing and notarization."
 ./scripts/package-app.sh
 echo "MACOS-RELEASE PREPARED"

@@ -767,18 +767,12 @@ wait_for_overlay_registration() {
 launch_or_show_overlay() {
     local tauri_bin="$ROOT_DIR/src-tauri/target/debug/harry-translate-mac"
     if overlay_is_running; then
-        log "检测到已注册的唯一悬浮窗，正在唤出..."
-        curl --fail --silent --show-error --max-time 2 \
-            -X POST "http://127.0.0.1:${ACTIVE_PORT}/api/overlay/launch" \
-            >/dev/null
-        release_launch_lock
-        return 0
+        log "检测到已注册的唯一悬浮窗，正在唤出设置窗口..."
     fi
 
     log "正在以附着模式启动唯一原生悬浮窗 (共享同一后端)..."
     HARRY_PROJECT_ROOT="$ROOT_DIR" \
         HARRY_ATTACH_BACKEND_URL="http://127.0.0.1:${ACTIVE_PORT}" \
-        HARRY_NO_OPEN_SETTINGS=1 \
         "$tauri_bin" &
     TAURI_PID=$!
     wait_for_overlay_registration

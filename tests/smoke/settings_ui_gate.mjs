@@ -42,8 +42,31 @@ try {
   for (const viewport of [
     { name: "desktop", width: 1440, height: 900 },
     { name: "tablet", width: 768, height: 640 },
+    { name: "native-settings-min", width: 820, height: 580, native: true },
   ]) {
     const page = await browser.newPage({ viewport });
+    if (viewport.native) {
+      await page.addInitScript(
+        ({ baseUrl }) => {
+          window.__TAURI_INTERNALS__ = {
+            invoke: async (command) => {
+              if (command === "get_backend_endpoint") {
+                const endpoint = new URL(baseUrl);
+                return {
+                  host: endpoint.hostname,
+                  port: Number(endpoint.port),
+                  baseUrl: endpoint.origin,
+                  wsBaseUrl: `ws://${endpoint.host}`,
+                  pid: 42,
+                };
+              }
+              return true;
+            },
+          };
+        },
+        { baseUrl },
+      );
+    }
     page.on("pageerror", (error) => consoleErrors.push(`${viewport.name}: ${error.message}`));
     page.on("console", (message) => {
       if (message.type() === "error" && !message.text().includes("favicon")) {
@@ -53,6 +76,48 @@ try {
 
     await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
     await page.locator(".settings-shell").waitFor();
+
+    const realtimeSwitch = page.getByRole("switch", { name: "实时翻译" });
+    if ((await realtimeSwitch.count()) !== 1) {
+      throw new Error(`${viewport.name}: expected exactly one realtime switch`);
+    }
+    const switchBox = await realtimeSwitch.boundingBox();
+    if (!switchBox || switchBox.width < 44 || switchBox.height < 26) {
+      throw new Error(
+        `${viewport.name}: realtime switch target is too small: ${JSON.stringify(switchBox)}`,
+      );
+    }
+    const legacyActions = await page
+      .getByRole("button", { name: /启动实时翻译|隐藏暂停/ })
+      .count();
+    if (legacyActions !== 0) {
+      throw new Error(`${viewport.name}: legacy dual realtime actions remain`);
+    }
+
+    if (viewport.native) {
+      const nativeExit = page.locator(".settings-native-exit__button");
+      if ((await nativeExit.count()) !== 1 || !(await nativeExit.isVisible())) {
+        throw new Error(`${viewport.name}: native exit action is missing`);
+      }
+      const nativeExitBox = await nativeExit.boundingBox();
+      if (
+        !nativeExitBox ||
+        nativeExitBox.x < 0 ||
+        nativeExitBox.y < 0 ||
+        nativeExitBox.x + nativeExitBox.width > viewport.width ||
+        nativeExitBox.y + nativeExitBox.height > viewport.height
+      ) {
+        throw new Error(
+          `${viewport.name}: native exit action is outside the viewport: ${JSON.stringify(
+            nativeExitBox,
+          )}`,
+        );
+      }
+      const auxiliaryButton = page.locator("button.settings-back--auxiliary");
+      if ((await auxiliaryButton.count()) !== 1) {
+        throw new Error(`${viewport.name}: native auxiliary opener is missing`);
+      }
+    }
 
     const navLabels = await page.locator(".settings-nav button").allInnerTexts();
     for (const expected of ["模型与服务", "声音与语言", "字幕与外观", "热词与总结", "通用与诊断"]) {
@@ -159,6 +224,7 @@ try {
       overflow,
       dashboardOverflow,
       audioNodes,
+      native: viewport.native === true,
     });
     await page.close();
   }

@@ -22,6 +22,8 @@ declare global {
 }
 
 let cachedEndpointPromise: Promise<BackendEndpoint> | null = null;
+const SIDECAR_READY_RETRY_ATTEMPTS = 40;
+const SIDECAR_READY_RETRY_DELAY_MS = 50;
 
 export function isTauriRuntime(): boolean {
   return (
@@ -72,6 +74,33 @@ export function resetBackendEndpointCache(): void {
   cachedEndpointPromise = null;
 }
 
+export function isSidecarNotReadyError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : typeof error === "string"
+        ? error
+        : String(error);
+  return message.includes("sidecar_not_ready");
+}
+
+async function getBackendEndpointWithRetry(): Promise<BackendEndpoint> {
+  for (let attempt = 0; attempt < SIDECAR_READY_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await tauriInvoke<BackendEndpoint>("get_backend_endpoint");
+    } catch (error) {
+      const isLastAttempt = attempt === SIDECAR_READY_RETRY_ATTEMPTS - 1;
+      if (!isSidecarNotReadyError(error) || isLastAttempt) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, SIDECAR_READY_RETRY_DELAY_MS);
+      });
+    }
+  }
+  throw new Error("sidecar_not_ready");
+}
+
 function browserFallbackEndpoint(): BackendEndpoint {
   const protocol =
     typeof window !== "undefined" && window.location.protocol === "https:"
@@ -102,12 +131,10 @@ export async function getBackendEndpoint(): Promise<BackendEndpoint> {
     return browserFallbackEndpoint();
   }
   if (!cachedEndpointPromise) {
-    cachedEndpointPromise = tauriInvoke<BackendEndpoint>("get_backend_endpoint").catch(
-      (error) => {
-        cachedEndpointPromise = null;
-        throw error;
-      },
-    );
+    cachedEndpointPromise = getBackendEndpointWithRetry().catch((error) => {
+      cachedEndpointPromise = null;
+      throw error;
+    });
   }
   return cachedEndpointPromise;
 }

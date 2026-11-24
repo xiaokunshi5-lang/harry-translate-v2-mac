@@ -8,6 +8,7 @@ pub mod macos_space;
 pub mod native;
 pub mod overlay;
 pub mod resize;
+pub mod settings;
 pub mod summary;
 pub mod tray;
 pub mod work_area;

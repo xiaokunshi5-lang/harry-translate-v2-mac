@@ -419,13 +419,13 @@ def overlay_binary_path(project_root: Path) -> Path | None:
     return None
 
 
-def _overlay_control_request(
+def _overlay_control_json(
     control_url: str,
     action: str,
     *,
     method: str = "POST",
     timeout: float = 0.75,
-) -> bool:
+) -> dict[str, Any] | None:
     normalized = normalize_overlay_control_url(control_url)
     if action not in {"health", "show", "hide", "shutdown"}:
         raise ValueError("unsupported_overlay_action")
@@ -438,10 +438,50 @@ def _overlay_control_request(
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=timeout) as response:
-            response.read(1024)
-            return 200 <= int(response.status) < 300
+            if not 200 <= int(response.status) < 300:
+                return None
+            payload = json.loads(response.read(4096).decode("utf-8"))
+            return payload if isinstance(payload, dict) else None
     except Exception:
-        return False
+        return None
+
+
+def _overlay_control_request(
+    control_url: str,
+    action: str,
+    *,
+    method: str = "POST",
+    timeout: float = 0.75,
+) -> bool:
+    return (
+        _overlay_control_json(
+            control_url,
+            action,
+            method=method,
+            timeout=timeout,
+        )
+        is not None
+    )
+
+
+def _overlay_control_health(
+    control_url: str,
+    *,
+    timeout: float = 0.35,
+) -> dict[str, Any] | None:
+    payload = _overlay_control_json(
+        control_url,
+        "health",
+        method="GET",
+        timeout=timeout,
+    )
+    if (
+        payload is None
+        or payload.get("ok") is not True
+        or not isinstance(payload.get("visible"), bool)
+    ):
+        return None
+    return payload
 
 
 def _overlay_process_running(application: FastAPI) -> bool:
@@ -742,6 +782,9 @@ def create_app(
     application.state.overlay_binary = overlay_path
     application.state.overlay_control_url = None
     application.state.overlay_visible = False
+    application.state.overlay_gate_active = False
+    application.state.realtime_enabled = False
+    application.state.overlay_stop_error = None
     application.state.overlay_process = None
     application.state.overlay_process_lock = threading.RLock()
     application.state.overlay_launch_lock = asyncio.Lock()
@@ -754,6 +797,120 @@ def create_app(
     lifecycle_lock = asyncio.Lock()
     patch_worker.bind_publisher(manager.publish_patch_event)
     summary_worker.bind_publisher(manager.publish_summary_event)
+
+    def _overlay_status_snapshot() -> dict[str, Any]:
+        control_url = application.state.overlay_control_url
+        process_running = _overlay_process_running(application)
+        return {
+            "ok": True,
+            "service": SERVICE_ID,
+            "running": bool(process_running or control_url),
+            "visible": bool(application.state.overlay_visible),
+            "realtime_enabled": bool(application.state.realtime_enabled),
+            "gate_active": bool(application.state.overlay_gate_active),
+            "stop_error": application.state.overlay_stop_error,
+            "registered": bool(control_url),
+            "control_url": control_url or "",
+            "binary_available": overlay_path is not None,
+            "fallback_url": "/hud?fallback=browser",
+        }
+
+    def _overlay_status_event() -> dict[str, Any]:
+        return {
+            "type": "overlay_status",
+            "overlay": _overlay_status_snapshot(),
+        }
+
+    async def _broadcast_overlay_status() -> None:
+        event = _overlay_status_event()
+        async with config_socket_lock:
+            for config_socket in tuple(passive_config_sockets):
+                try:
+                    await asyncio.wait_for(
+                        config_socket.send_json(event),
+                        timeout=0.25,
+                    )
+                except Exception:
+                    passive_config_sockets.discard(config_socket)
+                    try:
+                        await asyncio.wait_for(config_socket.close(), timeout=0.1)
+                    except Exception:
+                        pass
+
+    async def _close_main_clients(reason: str) -> None:
+        clients = tuple(manager.connected_clients.get("main", ()))
+        if not clients:
+            return
+        idle_event = {
+            "type": "engine_state",
+            "state": "idle",
+            "reason": reason,
+        }
+
+        async def close_client(client: Any) -> None:
+            manager.disconnect_client("main", client)
+            active_sockets.discard(client)
+            try:
+                await asyncio.wait_for(client.send_json(idle_event), timeout=0.25)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(client.close(code=1000), timeout=0.25)
+            except Exception:
+                pass
+
+        await asyncio.gather(
+            *(close_client(client) for client in clients),
+            return_exceptions=True,
+        )
+
+    async def _stop_main_realtime(reason: str) -> bool:
+        application.state.realtime_enabled = False
+        application.state.overlay_stop_error = None
+        manager.paused = True
+        await _close_main_clients(reason)
+        errors: list[str] = []
+        async with lifecycle_lock:
+            controller = manager.controller("main")
+            if controller is not None:
+                try:
+                    await asyncio.wait_for(controller.stop(), timeout=1.0)
+                except Exception as error:
+                    errors.append(f"controller:{type(error).__name__}")
+            if runtime is not None:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(runtime.stop),
+                        timeout=1.0,
+                    )
+                except Exception as error:
+                    errors.append(f"audio:{type(error).__name__}")
+            try:
+                await manager.deactivate_channel_if_idle("main")
+            except Exception as error:
+                errors.append(f"manager:{type(error).__name__}")
+        if errors:
+            application.state.overlay_stop_error = ",".join(errors)
+        return not errors
+
+    async def _show_overlay_control(control_url: str) -> bool:
+        application.state.overlay_gate_active = True
+        application.state.realtime_enabled = True
+        application.state.overlay_stop_error = None
+        manager.paused = False
+        shown = await asyncio.to_thread(
+            _overlay_control_request,
+            control_url,
+            "show",
+        )
+        application.state.overlay_visible = shown
+        if shown:
+            application.state.realtime_enabled = True
+            manager.paused = False
+        else:
+            await _stop_main_realtime("overlay_show_failed")
+        await _broadcast_overlay_status()
+        return shown
 
     def qwen_factory(
         *,
@@ -900,37 +1057,83 @@ def create_app(
             control_url = normalize_overlay_control_url(payload.get("control_url"))
         except ValueError as error:
             return JSONResponse(status_code=400, content={"error": str(error)})
+        visible = payload.get("visible") is True
+        existing_control_url = application.state.overlay_control_url
+        if existing_control_url == control_url:
+            stopped = True
+            if not application.state.realtime_enabled:
+                manager.paused = True
+                stopped = await _stop_main_realtime("realtime_disabled")
+            await _broadcast_overlay_status()
+            return JSONResponse(
+                status_code=200 if stopped else 503,
+                content={
+                    "ok": stopped,
+                    "registered": True,
+                    "control_url": control_url,
+                    "visible": bool(application.state.overlay_visible),
+                    "realtime_enabled": bool(application.state.realtime_enabled),
+                    "stop_error": application.state.overlay_stop_error,
+                },
+            )
         application.state.overlay_control_url = control_url
-        application.state.overlay_visible = True
+        application.state.overlay_visible = visible
+        application.state.overlay_gate_active = True
+        application.state.realtime_enabled = visible
+        if visible:
+            application.state.overlay_stop_error = None
+        manager.paused = not visible
+        stopped = True
+        if not visible:
+            stopped = await _stop_main_realtime("realtime_disabled")
         await asyncio.to_thread(persist_runtime_state)
+        await _broadcast_overlay_status()
         return JSONResponse(
+            status_code=200 if stopped else 503,
             content={
-                "ok": True,
+                "ok": stopped,
                 "registered": True,
                 "control_url": control_url,
-                "visible": True,
+                "visible": visible,
+                "realtime_enabled": visible,
+                "stop_error": application.state.overlay_stop_error,
             }
         )
 
-    @application.get("/api/overlay/status")
-    async def overlay_status() -> dict[str, Any]:
+    async def _overlay_status_payload() -> dict[str, Any]:
         process_running = _overlay_process_running(application)
         control_url = application.state.overlay_control_url
-        control_healthy = False
+        control_health: dict[str, Any] | None = None
         if control_url:
             try:
-                control_healthy = await asyncio.wait_for(
+                control_health = await asyncio.wait_for(
                     asyncio.to_thread(
-                        _overlay_control_request,
+                        _overlay_control_health,
                         control_url,
-                        "health",
-                        method="GET",
                         timeout=0.2,
                     ),
                     timeout=0.3,
                 )
             except asyncio.TimeoutError:
-                control_healthy = False
+                control_health = None
+        control_healthy = control_health is not None
+        if control_health is not None:
+            native_visible = bool(control_health["visible"])
+            application.state.overlay_visible = native_visible
+            if application.state.overlay_gate_active:
+                application.state.realtime_enabled = native_visible
+                manager.paused = not native_visible
+                runtime_active = runtime is not None and runtime.is_running
+                if not native_visible and (
+                    manager.active_client_count("main") > 0 or runtime_active
+                ):
+                    await _stop_main_realtime("overlay_hidden")
+        elif control_url and application.state.overlay_gate_active:
+            application.state.realtime_enabled = False
+            manager.paused = True
+            runtime_active = runtime is not None and runtime.is_running
+            if manager.active_client_count("main") > 0 or runtime_active:
+                await _stop_main_realtime("overlay_control_unavailable")
         if (
             control_url
             and not control_healthy
@@ -939,39 +1142,33 @@ def create_app(
         ):
             application.state.overlay_control_url = None
             application.state.overlay_visible = False
+            if application.state.overlay_gate_active:
+                application.state.realtime_enabled = False
+                manager.paused = True
             await asyncio.to_thread(persist_runtime_state)
-        current_control_url = application.state.overlay_control_url
-        control_running = bool(
-            control_healthy and current_control_url == control_url
-        )
-        return {
-            "ok": True,
-            "service": SERVICE_ID,
-            "running": bool(process_running or control_running),
-            "visible": bool(application.state.overlay_visible),
-            "registered": bool(current_control_url),
-            "control_url": current_control_url or "",
-            "binary_available": overlay_path is not None,
-            "fallback_url": "/hud?fallback=browser",
-        }
+        return _overlay_status_snapshot()
+
+    @application.get("/api/overlay/status")
+    async def overlay_status() -> dict[str, Any]:
+        async with application.state.overlay_launch_lock:
+            return await _overlay_status_payload()
 
     @application.post("/api/overlay/launch")
     async def overlay_launch() -> JSONResponse:
         async with application.state.overlay_launch_lock:
             control_url = application.state.overlay_control_url
-            if control_url and await asyncio.to_thread(
-                _overlay_control_request,
-                control_url,
-                "health",
-                method="GET",
-                timeout=0.35,
-            ):
-                shown = await asyncio.to_thread(
+            control_healthy = bool(
+                control_url
+                and await asyncio.to_thread(
                     _overlay_control_request,
                     control_url,
-                    "show",
+                    "health",
+                    method="GET",
+                    timeout=0.35,
                 )
-                application.state.overlay_visible = shown
+            )
+            if control_url and control_healthy:
+                shown = await _show_overlay_control(control_url)
                 return JSONResponse(
                     status_code=200 if shown else 502,
                     content={
@@ -979,11 +1176,13 @@ def create_app(
                         "action": "shown" if shown else "control_failed",
                         "running": True,
                         "visible": shown,
+                        "realtime_enabled": application.state.realtime_enabled,
                         "control_url": control_url,
                     },
                 )
 
             if control_url:
+                await _stop_main_realtime("overlay_control_unavailable")
                 application.state.overlay_control_url = None
                 application.state.overlay_visible = False
                 await asyncio.to_thread(persist_runtime_state)
@@ -999,32 +1198,33 @@ def create_app(
                         method="GET",
                         timeout=0.2,
                     ):
-                        shown = await asyncio.to_thread(
-                            _overlay_control_request,
-                            registered_url,
-                            "show",
-                        )
-                        application.state.overlay_visible = shown
+                        shown = await _show_overlay_control(registered_url)
                         return JSONResponse(
                             content={
                                 "ok": shown,
                                 "action": "shown" if shown else "starting",
                                 "running": True,
                                 "visible": shown,
+                                "realtime_enabled": application.state.realtime_enabled,
                                 "control_url": registered_url,
                             }
                         )
+                await _broadcast_overlay_status()
                 return JSONResponse(
                     content={
                         "ok": True,
                         "action": "starting",
                         "running": True,
                         "visible": False,
+                        "realtime_enabled": False,
                         "control_url": "",
                     }
                 )
 
             if overlay_path is None:
+                if application.state.overlay_gate_active:
+                    await _stop_main_realtime("overlay_binary_unavailable")
+                await _broadcast_overlay_status()
                 return JSONResponse(
                     content={
                         "ok": True,
@@ -1038,6 +1238,8 @@ def create_app(
 
             actual_port = int(application.state.port)
             if not 1 <= actual_port <= 65_535:
+                await _stop_main_realtime("backend_port_unavailable")
+                await _broadcast_overlay_status()
                 return JSONResponse(
                     status_code=409,
                     content={"error": "backend_port_unavailable"},
@@ -1061,51 +1263,102 @@ def create_app(
                     stderr=subprocess.DEVNULL,
                 )
             except OSError:
+                await _stop_main_realtime("overlay_launch_failed")
+                await _broadcast_overlay_status()
                 return JSONResponse(
                     status_code=500,
                     content={"error": "overlay_launch_failed"},
                 )
             with application.state.overlay_process_lock:
                 application.state.overlay_process = process
+
+            deadline = asyncio.get_running_loop().time() + 1.5
+            while asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.05)
+                registered_url = application.state.overlay_control_url
+                if not registered_url:
+                    continue
+                if await asyncio.to_thread(
+                    _overlay_control_request,
+                    registered_url,
+                    "health",
+                    method="GET",
+                    timeout=0.2,
+                ):
+                    shown = await _show_overlay_control(registered_url)
+                    return JSONResponse(
+                        content={
+                            "ok": shown,
+                            "action": "shown" if shown else "starting",
+                            "running": True,
+                            "visible": shown,
+                            "realtime_enabled": application.state.realtime_enabled,
+                            "binary_available": True,
+                            "control_url": registered_url,
+                        }
+                    )
+            await _broadcast_overlay_status()
             return JSONResponse(
                 content={
                     "ok": True,
-                    "action": "launched",
+                    "action": "starting",
                     "running": True,
                     "visible": False,
+                    "realtime_enabled": False,
                     "binary_available": True,
                 }
             )
 
     @application.post("/api/overlay/hide")
     async def overlay_hide() -> JSONResponse:
-        control_url = application.state.overlay_control_url
-        if not control_url:
-            return JSONResponse(
-                content={
-                    "ok": True,
-                    "action": "not_running",
-                    "running": False,
-                    "visible": False,
-                }
+        async with application.state.overlay_launch_lock:
+            control_url = application.state.overlay_control_url
+            application.state.overlay_gate_active = True
+            application.state.realtime_enabled = False
+            stopped = await _stop_main_realtime("realtime_disabled")
+            if not control_url:
+                application.state.overlay_visible = False
+                await _broadcast_overlay_status()
+                return JSONResponse(
+                    status_code=200 if stopped else 503,
+                    content={
+                        "ok": stopped,
+                        "action": "not_running",
+                        "running": False,
+                        "visible": False,
+                        "realtime_enabled": False,
+                        "stop_error": application.state.overlay_stop_error,
+                    }
+                )
+            hidden = await asyncio.to_thread(
+                _overlay_control_request,
+                control_url,
+                "hide",
             )
-        hidden = await asyncio.to_thread(
-            _overlay_control_request,
-            control_url,
-            "hide",
-        )
-        if hidden:
-            application.state.overlay_visible = False
-        return JSONResponse(
-            status_code=200 if hidden else 502,
-            content={
-                "ok": hidden,
-                "action": "hidden" if hidden else "control_failed",
-                "running": True,
-                "visible": False if hidden else application.state.overlay_visible,
-                "control_url": control_url,
-            },
-        )
+            if hidden:
+                application.state.overlay_visible = False
+            await _broadcast_overlay_status()
+            if not hidden:
+                status_code = 502
+                action = "control_failed"
+            elif not stopped:
+                status_code = 503
+                action = "stop_failed"
+            else:
+                status_code = 200
+                action = "hidden"
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "ok": hidden and stopped,
+                    "action": action,
+                    "running": True,
+                    "visible": False if hidden else application.state.overlay_visible,
+                    "realtime_enabled": False,
+                    "stop_error": application.state.overlay_stop_error,
+                    "control_url": control_url,
+                },
+            )
 
     @application.get("/api/audio/devices")
     def audio_devices() -> dict[str, Any]:
@@ -1702,6 +1955,7 @@ def create_app(
         passive_config_sockets.add(websocket)
         try:
             await websocket.send_json(_config_event(store().load_settings()))
+            await websocket.send_json(_overlay_status_event())
             while True:
                 message = await websocket.receive_text()
                 try:
@@ -1723,6 +1977,26 @@ def create_app(
         resolved_channel = "main" if channel == "subtitles" else channel
         if resolved_channel not in SUPPORTED_CHANNELS:
             await websocket.close(code=1003)
+            return
+
+        if (
+            resolved_channel == "main"
+            and application.state.overlay_gate_active
+            and not application.state.realtime_enabled
+        ):
+            await websocket.accept()
+            active_sockets.add(websocket)
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "engine_state",
+                        "state": "idle",
+                        "reason": "realtime_disabled",
+                    }
+                )
+                await websocket.close(code=1000)
+            finally:
+                active_sockets.discard(websocket)
             return
 
         await websocket.accept()

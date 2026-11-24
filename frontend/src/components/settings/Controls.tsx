@@ -77,21 +77,40 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
+  busy = false,
+  id,
+  ariaDescribedBy,
+  className,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  disabled?: boolean;
+  busy?: boolean;
+  id?: string;
+  ariaDescribedBy?: string;
+  className?: string;
 }) {
+  const blocked = disabled || busy;
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
-      className={`settings-toggle${checked ? " is-on" : ""}`}
-      onClick={() => onChange(!checked)}
+      aria-busy={busy || undefined}
+      aria-describedby={ariaDescribedBy}
+      className={`settings-toggle${checked ? " is-on" : ""}${
+        className ? ` ${className}` : ""
+      }`}
+      disabled={blocked}
+      onClick={() => {
+        if (!blocked) onChange(!checked);
+      }}
     >
-      <span />
+      <span className="settings-toggle__thumb" />
     </button>
   );
 }

@@ -30,6 +30,8 @@ let rows = windows.compactMap { item -> [String: Any]? in
     let name = item[kCGWindowName as String] as? String ?? ""
     let layer = item[kCGWindowLayer as String] as? Int ?? -1
     guard owner.contains("harry-translate-mac")
+        || owner.contains("HARRY Translate")
+        || name.contains("HARRY Translate")
         || owner.contains("fullscreen-fixture")
         || name.contains("R155S Fullscreen Fixture") else {
         return nil
@@ -170,6 +172,29 @@ def _window_snapshot() -> list[dict[str, Any]]:
     return json.loads(result.stdout)
 
 
+def _wait_settings_window(
+    process_pid: int,
+    timeout: float = 8.0,
+) -> list[dict[str, Any]]:
+    deadline = time.monotonic() + timeout
+    last_windows: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        last_windows = _window_snapshot()
+        settings_windows = [
+            window
+            for window in last_windows
+            if int(window["pid"]) == process_pid
+            and int(window.get("layer", -1)) == 0
+        ]
+        if settings_windows:
+            return settings_windows
+        time.sleep(0.2)
+    raise AssertionError(
+        "native settings window did not become visible within "
+        f"{timeout}s; last windows={last_windows}"
+    )
+
+
 def _wait_fullscreen_windows(
     overlay_pid: int,
     fixture_pid: int,
@@ -238,6 +263,8 @@ def _start_overlay(
     backend_pid: int,
     backend_port: int,
     instance_token: str,
+    *,
+    open_settings: bool = False,
 ) -> tuple[subprocess.Popen[str], str]:
     overlay_environment = environment.copy()
     overlay_environment.update(
@@ -246,9 +273,12 @@ def _start_overlay(
             "HARRY_ATTACH_BACKEND_URL": f"http://127.0.0.1:{backend_port}",
             "HARRY_OWNER_PID": str(backend_pid),
             "HARRY_INSTANCE_TOKEN": instance_token,
-            "HARRY_NO_OPEN_SETTINGS": "1",
         }
     )
+    if open_settings:
+        overlay_environment.pop("HARRY_NO_OPEN_SETTINGS", None)
+    else:
+        overlay_environment["HARRY_NO_OPEN_SETTINGS"] = "1"
     process = subprocess.Popen(
         [str(TAURI_BINARY)],
         cwd=ROOT,
@@ -270,6 +300,7 @@ def _assert_panel(
     expected_class: str | None,
     *,
     expected_size: tuple[float, float] | None = None,
+    expected_visible: bool = True,
 ) -> None:
     required_bits = (1 << 0) | (1 << 8) | (1 << 18)
     collection_behavior = int(panel["collectionBehavior"])
@@ -279,8 +310,11 @@ def _assert_panel(
         raise AssertionError(f"unexpected window level: {panel['windowLevel']}")
     if expected_class is not None and expected_class not in str(panel["className"]):
         raise AssertionError(f"unexpected panel class: {panel['className']}")
-    if not bool(panel["visible"]):
-        raise AssertionError(f"{panel['label']} panel is not visible")
+    if bool(panel["visible"]) is not expected_visible:
+        raise AssertionError(
+            f"{panel['label']} panel visible={panel['visible']}, "
+            f"expected {expected_visible}"
+        )
     if expected_size is not None:
         actual_size = (float(panel["frameWidth"]), float(panel["frameHeight"]))
         if actual_size != expected_size:
@@ -312,6 +346,7 @@ def main() -> int:
         overlay: subprocess.Popen[str] | None = None
         second_overlay: subprocess.Popen[str] | None = None
         restarted_overlay: subprocess.Popen[str] | None = None
+        duplicate_settings: subprocess.Popen[str] | None = None
         fullscreen_fixture: subprocess.Popen[str] | None = None
         kill_backend: subprocess.Popen[str] | None = None
         kill_overlay: subprocess.Popen[str] | None = None
@@ -370,13 +405,39 @@ def main() -> int:
                 if diagnostics.get("summary") is not None:
                     break
                 time.sleep(0.1)
-            _assert_panel(diagnostics["overlay"], "HarrySubtitlePanel")
+            _assert_panel(
+                diagnostics["overlay"],
+                "HarrySubtitlePanel",
+                expected_visible=False,
+            )
             _assert_panel(
                 diagnostics["summary"],
                 None,
                 expected_size=(48.0, 48.0),
             )
             evidence["diagnostics"] = diagnostics
+
+            launch_request = urllib.request.Request(
+                f"{base_url}/api/overlay/launch",
+                data=b"",
+                method="POST",
+            )
+            with LOCAL_OPENER.open(launch_request, timeout=3) as response:
+                launch_payload = json.loads(response.read())
+                if response.status != 200 or launch_payload.get("visible") is not True:
+                    raise AssertionError(
+                        f"launch did not show the overlay: {launch_payload}"
+                    )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                diagnostics = _wait_json(f"{control_url}/diagnostics")
+                if bool(diagnostics["overlay"]["visible"]):
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("launch did not make the overlay visible")
+            _assert_panel(diagnostics["overlay"], "HarrySubtitlePanel")
+            evidence["launch"] = launch_payload
 
             for cycle in range(3):
                 _set_summary_enabled(base_url, False)
@@ -444,7 +505,7 @@ def main() -> int:
             time.sleep(1.0)
 
             hide_request = urllib.request.Request(
-                f"{control_url}/hide",
+                f"{base_url}/api/overlay/hide",
                 data=b"",
                 method="POST",
             )
@@ -465,12 +526,13 @@ def main() -> int:
             evidence["duplicate_returncode"] = _wait_exit(second_overlay)
             if overlay.poll() is not None:
                 raise AssertionError("primary overlay exited after duplicate launch")
-            shown_health = _wait_json(f"{control_url}/health")
-            if shown_health.get("visible") is not True:
+            hidden_after_duplicate = _wait_json(f"{control_url}/health")
+            if hidden_after_duplicate.get("visible") is not False:
                 raise AssertionError(
-                    f"duplicate launch did not restore visible health: {shown_health}"
+                    "duplicate launch resurrected the hidden overlay instead of "
+                    f"leaving settings routing to the primary host: {hidden_after_duplicate}"
                 )
-            evidence["duplicate_visible_health"] = shown_health
+            evidence["duplicate_hidden_health"] = hidden_after_duplicate
 
             shutdown_request = urllib.request.Request(
                 f"{control_url}/shutdown",
@@ -488,8 +550,39 @@ def main() -> int:
                 backend.pid,
                 int(ready["port"]),
                 instance_token,
+                open_settings=True,
             )
             _wait_json(f"{restarted_control}/diagnostics")
+            initial_settings_windows = _wait_settings_window(restarted_overlay.pid)
+            settings_health = _wait_json(f"{restarted_control}/health")
+            if settings_health.get("visible") is not False:
+                raise AssertionError(
+                    "opening settings must leave the subtitle overlay hidden: "
+                    f"{settings_health}"
+                )
+            evidence["settings_windows"] = initial_settings_windows
+
+            duplicate_settings, _ = _start_overlay(
+                root,
+                environment,
+                backend.pid,
+                int(ready["port"]),
+                instance_token,
+                open_settings=True,
+            )
+            evidence["duplicate_settings_returncode"] = _wait_exit(
+                duplicate_settings
+            )
+            if restarted_overlay.poll() is not None:
+                raise AssertionError("primary settings host exited on duplicate launch")
+            duplicate_settings_windows = _wait_settings_window(restarted_overlay.pid)
+            duplicate_health = _wait_json(f"{restarted_control}/health")
+            if duplicate_health.get("visible") is not False:
+                raise AssertionError(
+                    "settings restore route must not display the hidden overlay: "
+                    f"{duplicate_health}"
+                )
+            evidence["duplicate_settings_windows"] = duplicate_settings_windows
 
             backend_shutdown = urllib.request.Request(
                 f"{base_url}/api/system/shutdown",
@@ -563,6 +656,7 @@ def main() -> int:
             _terminate(fullscreen_fixture)
             _terminate(kill_overlay)
             _terminate(kill_backend)
+            _terminate(duplicate_settings)
             _terminate(restarted_overlay)
             _terminate(second_overlay)
             _terminate(overlay)

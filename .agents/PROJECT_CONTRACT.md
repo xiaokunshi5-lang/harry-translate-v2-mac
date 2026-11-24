@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-contract_version: 0.5.2
+contract_version: 0.5.3
 contract_status: CONFIRMED
 project_name: "HARRY Translate V2 Mac"
 initialized_at: "2026-11-22"
@@ -43,6 +43,7 @@ ui_contract_enabled: true
 | F-17 | 阶段验收后的 R15.5/R15.5S 已由用户验收；`fix-attempt/R155S/2`（`a77c38e`）为最终候选，收口标签为 `checkpoint-r155s-ok` 与 `post-fix-R155S`，不移动 `v2.0-p5-stable` | 用户最终验收、`ADR-014`、`ADR-015` | `[已确认]` | 用户 / 2026-11-23 |
 | F-18 | R16 已完成自动与人工收口，标签为 `checkpoint-r16-ok` / `7583c4d`。MD/SRT/JSON 用户侧下载/打开尚未开放，用户决定暂不修复并作为已知待办保留 | 用户验收反馈、`ADR-017`、阶段 6 handoff | `[已确认]` | 用户 / 2026-11-24 |
 | F-19 | R17 已由用户授权并完成 AC-19/AC-20 终审压测、合规审计、全量回归和本地出厂构建。长会话压测发现并修复清洗器无界段落状态；`ADR-018` 记录语义差分与有界状态决策 | 用户执行授权、`ADR-018`、`docs/RELEASE_REPORT_v2.0.md` | `[已确认]` | 用户 / 2026-11-24 |
+| F-20 | R18-01 至 R18-04 已全部由用户人工验收通过。收口标签为 `checkpoint-r18-01-ok`、`checkpoint-r18-02-ok`、`checkpoint-r18-03-ok`、`checkpoint-r18-04-ok` 和 `post-fix-R18`；候选提交为 `47c3480`。公开发布使用新标签 `v2.0-r18-ready`，不移动 `v2.0-mac-ready` | 用户全项验收、`ADR-019` 至 `ADR-022`、`docs/RELEASE_REPORT_R18.md` | `[已确认]` | 用户 / 2026-11-24 |
 
 ## 1. 第一要义、成功与失败
 
@@ -85,6 +86,7 @@ ui_contract_enabled: true
 | C-07 | 快速切语、健康探测与防串句 | `app/engines/qwen_realtime.py`, `app/session_manager.py`, `frontend/src/lib/subtitles/languagePurity.ts`, `LanguageStatusCapsule.tsx` | PING/PONG 10s/4s；READY 连续健康 10s 才复位退避；`session.finish <=250ms`；`session_reset` 清残句；Web 显示真实健康态 | `<400>` 时无热词降级；系统音源缺失只停 system 通道 | `tests/core_regression/test_single_window_stability.py`, `frontend/src/lib/subtitles/languagePurity.test.ts` |
 | C-08 | R16 物理麦克风 AGC、Qwen 3.8 安全 commit 与单会话导出基础 | `app/audio/pipeline.py`, `app/engines/qwen_realtime.py`, `app/transcript_exporter.py`, `app/main.py` | AGC 只处理物理麦克风；系统流直通；commit 与 append 共用有界队列；`qwen3.8*` 零顶层 `turn_detection`；内部原子保存/格式化保持零 Token/usage/费用 | 缺回环设备仍回退麦克风；MD/SRT/JSON 用户侧下载/打开暂不开放，不得宣称为已完成用户能力 | `tests/core_regression/test_dual_audio_dsp.py`, `tests/unit/test_exporter.py`, `tests/unit/test_package_smoke.py` |
 | C-09 | R17 长会话清洗、1000 卡片、WS 与出厂门禁 | `app/transcript_cleaner.py`, `tests/bench/test_soak_benchmark.py`, `frontend/src/windows/overlay/timeline/TimelineSoak.test.tsx` | 只保留当前段落有界窗口和单调段落号；卡片硬上限 1000；后/前 100 句耗时比 `<=1.2`；250 词冷启动 `<5ms`；单窗与 250ms 收尾不退化 | 不缩小句子数、不放宽 1.2x/5ms/250ms/3% 阈值；真实设备与联网边界仍单列 | `tests/bench/test_soak_benchmark.py`, `frontend/src/windows/overlay/timeline/TimelineSoak.test.tsx` |
+| C-10 | R18 安静启动、权威实时翻译滑钮与原生窗口生命周期 | `src-tauri/src/windows/settings.rs`, `src-tauri/src/windows/tray.rs`, `app/main.py`, `frontend/src/screens/SettingsView.tsx` | 冷启动只显示原生 `settings` 窗口且 `overlay` 隐藏；顶栏只有一个由后端真实状态驱动的实时翻译滑钮；Dock、Finder、菜单和 `Cmd+,` 统一恢复设置窗；显式退出回收 Sidecar 与音频；`/ws/config` 仍为被动通道 | 无 API Key 时滑钮禁用并说明原因；关闭设置窗只隐藏，不停止当前翻译；辅助大屏只打开外部浏览器 | `tests/unit/test_repro_r18_01_quiet_launch_and_stop.py`, `tests/unit/test_repro_r18_02_realtime_switch.py`, `tests/unit/test_repro_r18_03_native_settings_lifecycle.py` |
 
 ## 4. 设计意图账本
 
@@ -103,8 +105,8 @@ ui_contract_enabled: true
 
 ## 5. 已知良好基线与禁改清单
 
-- **稳定基线**：`v0.1-v1-baseline-stable` 保留为 V1 回退基线；Phase 4 稳定基线为 `v2.0-p4-stable`（`a8f514f`）；Phase 5 实现基线为 `v2.0-p5-stable`（`b1215d9`）；阶段验收修复由 `checkpoint-r155s-ok` 与 `post-fix-R155S` 单独封存；R16 L1 为 `pre-feature-p6-20261123`（`4b60435`），R16 收口为 `checkpoint-r16-ok`（`7583c4d`），禁止移动旧阶段标签。
-- **当前已知失败 / 待开放**：R16 的 MD/SRT/JSON 用户侧下载或打开尚未正常开放；内部原子保存与格式化代码保留，但不得计入已完成的用户能力。用户已决定 R16 暂不修复，后续必须另行授权。Phase 4/5 自动化测试仍必须零失败；真实长时间网络闪断、真实 DashScope 旁路质量、原生总结窗口交互与完整原生 Core Audio Process Tap 不得仅凭 Mock 宣称通过。
+- **稳定基线**：`v0.1-v1-baseline-stable` 保留为 V1 回退基线；Phase 4 稳定基线为 `v2.0-p4-stable`（`a8f514f`）；Phase 5 实现基线为 `v2.0-p5-stable`（`b1215d9`）；阶段验收修复由 `checkpoint-r155s-ok` 与 `post-fix-R155S` 单独封存；R16 L1 为 `pre-feature-p6-20261123`（`4b60435`），R16 收口为 `checkpoint-r16-ok`（`7583c4d`）；R18 验收候选为 `47c3480`，收口为 `checkpoint-r18-04-ok` 与 `post-fix-R18`。禁止移动旧阶段标签。
+- **当前已知失败 / 待开放**：R16 的 MD/SRT/JSON 用户侧下载或打开尚未正常开放；内部原子保存与格式化代码保留，但不得计入已完成的用户能力。用户已决定 R16 暂不修复，后续必须另行授权。R18 发布包仍是 ad-hoc 签名，带 `com.apple.quarantine` 时可能显示“已损坏”；Developer ID 签名、Apple 公证与干净 Mac 零提示启动尚未获得证书环境验证。Phase 4/5 自动化测试仍必须零失败；真实长时间网络闪断、真实 DashScope 旁路质量、原生总结窗口交互与完整原生 Core Audio Process Tap 不得仅凭 Mock 宣称通过。
 - **已证伪方案 / 禁止重复尝试**：
   1. `CHUNK_SIZE=3200` 的 200ms 切片不得作为 V2 目标。
   2. `useSubtitleTail` 的 100 至 400ms 憋字不得引入。

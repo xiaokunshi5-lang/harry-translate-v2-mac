@@ -2,10 +2,11 @@
 //! The tray and browser settings page are the only ways to leave immersive mode.
 
 use crate::windows::controls::{
-    apply_native_presentation, open_settings_in_browser, show_primary_overlay_window,
+    apply_native_presentation, request_application_exit, show_primary_overlay_window,
     sync_overlay_to_sidecar, SharedAppState,
 };
 use crate::windows::overlay::OverlaySnapshot;
+use crate::windows::settings::show_and_focus_settings_window;
 use crate::windows::work_area::primary_work_area;
 use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -27,13 +28,8 @@ pub fn install_tray(
     app: &tauri::App,
     snapshot: &OverlaySnapshot,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let open_settings = MenuItem::with_id(
-        app,
-        OPEN_SETTINGS_ID,
-        "打开配置页（浏览器）",
-        true,
-        None::<&str>,
-    )?;
+    let open_settings =
+        MenuItem::with_id(app, OPEN_SETTINGS_ID, "打开设置窗口", true, None::<&str>)?;
     let immersive = CheckMenuItem::with_id(
         app,
         IMMERSIVE_ID,
@@ -51,7 +47,7 @@ pub fn install_tray(
         None::<&str>,
     )?;
     let reset = MenuItem::with_id(app, RESET_ID, "重置悬浮窗位置与尺寸", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "退出悬浮窗", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "退出 HARRY Translate", true, None::<&str>)?;
     let menu = MenuBuilder::new(app)
         .items(&[&open_settings, &immersive, &locked, &reset, &quit])
         .build()?;
@@ -76,7 +72,9 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
     };
     match id {
         OPEN_SETTINGS_ID => {
-            let _ = open_settings_in_browser(app);
+            if let Err(error) = show_and_focus_settings_window(app) {
+                tracing::warn!("tray could not show settings window: {error}");
+            }
         }
         IMMERSIVE_ID => {
             let current = state.overlay.lock().snapshot();
@@ -99,8 +97,7 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             }
         }
         QUIT_ID => {
-            state.sidecar.shutdown();
-            app.exit(0);
+            request_application_exit(app.clone());
         }
         _ => {}
     }
@@ -126,11 +123,11 @@ mod tests {
     #[test]
     fn tray_contract_contains_all_escape_actions() {
         let labels = [
-            "打开配置页（浏览器）",
+            "打开设置窗口",
             "沉浸模式（透明穿透）",
             "锁定穿透（保留底色）",
             "重置悬浮窗位置与尺寸",
-            "退出悬浮窗",
+            "退出 HARRY Translate",
         ];
         assert_eq!(TRAY_ID, "harry-tray");
         assert_eq!(labels.len(), 5);
